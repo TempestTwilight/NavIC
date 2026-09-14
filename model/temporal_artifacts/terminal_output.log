@@ -1,0 +1,187 @@
+===========================================================================
+ Temporal GNSS C/N0 Prediction
+===========================================================================
+
+Loading:
+/home/tempest/Documents/ISRO_Project/results/merged_data/combined_corpus.parquet
+
+Loaded rows: 902,215
+Sessions: 14
+Devices: 1
+
+Device IDs:
+device_id
+unknown    902215
+Name: count, dtype: int64
+
+WARNING:
+All rows have device_id='unknown'.
+Device-held-out validation will therefore NOT test hardware generalization.
+
+--- Filtering ---
+C/N0 > 0: 727,498 (dropped 174,717)
+CalibrationAccuracy == 3: 727,498 (dropped 0)
+Valid orientation: 727,498 (dropped 0)
+Orientation |dt| <= 100 ms: 727,498 (dropped 0)
+
+--- Sorting signal tracks ---
+
+--- Building temporal features ---
+  Adding C/N0 lag 1s...
+  Adding C/N0 lag 2s...
+  Adding C/N0 lag 5s...
+  Adding C/N0 lag 10s...
+  Adding elevation lag 1s...
+  Adding elevation lag 5s...
+
+--- Building temporal derivatives ---
+
+--- Constructing t -> t+1 second target ---
+
+--- Target quality ---
+Rows with t+1s target: 723,336
+Rows without target: 4,162
+
+--- Building model features ---
+
+Complete temporal examples: 696,727
+Dropped: 26,609
+
+===========================================================================
+ Cross Validation
+===========================================================================
+
+Only one device detected.
+Using held-out SESSION validation.
+
+--- Ridge Regression ---
+Fold 1: held=['135_degree_back_horizontal' '45_degree_front_vertical'
+ '90_degree_back_vertical'], RMSE=1.139, MAE=0.597, R²=0.972
+Fold 2: held=['0_degree_down_facing' '45_degree_back_horizontal'
+ '45_degree_back_vertical'], RMSE=1.347, MAE=0.712, R²=0.963
+Fold 3: held=['0_degree_up_facing' '135_degree_front_horizontal'
+ '90_degree_back_horizontal' '90_degree_front_vertical'], RMSE=0.982, MAE=0.510, R²=0.978
+Fold 4: held=['135_degree_back_vertical' '135_degree_front_vertical'
+ '45_degree_front_horizontal' '90_degree_front_horizontal'], RMSE=1.107, MAE=0.579, R²=0.976
+
+Ridge average:
+RMSE: 1.144 ± 0.131
+MAE:  0.600
+R²:   0.972
+
+--- Random Forest ---
+RF training rows: 210,000
+Fold 1: held=['0_degree_up_facing' '135_degree_front_vertical'
+ '45_degree_front_vertical' '90_degree_front_vertical'], RMSE=0.996, MAE=0.506, R²=0.979
+Fold 2: held=['0_degree_down_facing' '135_degree_front_horizontal'
+ '45_degree_front_horizontal' '90_degree_front_horizontal'], RMSE=1.040, MAE=0.514, R²=0.976
+Fold 3: held=['135_degree_back_vertical' '45_degree_back_vertical'
+ '90_degree_back_vertical'], RMSE=1.247, MAE=0.649, R²=0.969
+Fold 4: held=['135_degree_back_horizontal' '45_degree_back_horizontal'
+ '90_degree_back_horizontal'], RMSE=1.257, MAE=0.687, R²=0.965
+
+Random Forest average:
+RMSE: 1.135 ± 0.118
+MAE:  0.589
+R²:   0.972
+
+--- Training final models ---
+
+--- Feature importance ---
+WARNING: feature_cols has 40 names but Ridge has 53 coefficients.
+Ridge pipeline steps: ['scaler', 'ridge']
+
+Top Ridge coefficients:
+   feature  coefficient  abs_coefficient
+feature_22     0.800773         0.800773
+feature_21     0.800773         0.800773
+feature_27     0.795748         0.795748
+feature_28     0.795748         0.795748
+feature_31     0.785149         0.785149
+feature_32     0.785149         0.785149
+feature_34     0.779163         0.779163
+feature_33     0.779163         0.779163
+feature_30     0.284913         0.284913
+feature_29     0.284913         0.284913
+feature_40     0.078818         0.078818
+feature_39     0.078818         0.078818
+feature_45     0.078818         0.078818
+feature_46     0.078818         0.078818
+ feature_0     0.078154         0.078154
+feature_37     0.065929         0.065929
+feature_38     0.065929         0.065929
+feature_44     0.065929         0.065929
+feature_43     0.065929         0.065929
+ feature_9    -0.060267         0.060267
+WARNING: feature_cols has 40 names but RF has 53 importances.
+
+Top Random Forest features:
+   feature  importance
+feature_21    0.517992
+feature_22    0.469402
+feature_27    0.003627
+feature_28    0.003380
+feature_29    0.001317
+feature_30    0.001294
+feature_31    0.000819
+feature_32    0.000807
+feature_34    0.000555
+feature_33    0.000530
+feature_44    0.000023
+feature_37    0.000020
+feature_45    0.000020
+feature_43    0.000020
+feature_39    0.000018
+feature_38    0.000018
+feature_46    0.000016
+feature_40    0.000016
+feature_19    0.000013
+ feature_3    0.000013
+
+===========================================================================
+ Signal Selection Evaluation
+===========================================================================
+
+Epochs evaluated: 9,858
+
+Current-best baseline:
+  Top-1 accuracy: 95.43%
+  Mean regret: 0.072 dB-Hz
+
+Temporal Ridge:
+  Top-1 accuracy: 93.55%
+  Top-3 accuracy: 98.38%
+  Mean regret: 0.065 dB-Hz
+
+--- Saving artifacts ---
+
+===========================================================================
+ FINAL SUMMARY
+===========================================================================
+
+Training examples: 696,727
+Features: 40
+Prediction horizon: 1000 ms
+CV type: held-out-session
+
+Ridge:
+  RMSE = 1.144
+  MAE  = 0.600
+  R²   = 0.972
+
+Random Forest:
+  RMSE = 1.135
+  MAE  = 0.589
+  R²   = 0.972
+
+Signal selection:
+  Baseline Top-1 = 95.43%
+  Ridge Top-1    = 93.55%
+  Ridge Top-3    = 98.38%
+  Baseline regret = 0.072 dB-Hz
+  Ridge regret    = 0.065 dB-Hz
+
+Artifacts:
+/home/tempest/Documents/ISRO_Project/model/temporal_artifacts
+
+Done.
