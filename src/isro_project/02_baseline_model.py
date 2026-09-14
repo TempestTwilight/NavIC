@@ -62,7 +62,7 @@ RESULTS_DIR = PROJECT_ROOT / "results"
 
 DATA_PATH = RESULTS_DIR / "merged_data" / "combined_corpus.parquet"
 
-OUTPUT_DIR = PROJECT_ROOT / "model" / "temporal_artifacts"
+OUTPUT_DIR = PROJECT_ROOT / "model" / "baseline_artifacts"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
