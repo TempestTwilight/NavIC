@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Custom
+data/
+merged_data/
+test.py
+.vscode
+notebooks/
+
+# AI
+AGENTS.md 
+CLAUDE.md
+INSTRUCTIONS.md 
