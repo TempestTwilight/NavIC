@@ -30,10 +30,7 @@ PROJECT_ROOT = Path().resolve()
 DATA_DIR = PROJECT_ROOT / "data" / "Categorized_Data"
 OUTPUT_DIR = PROJECT_ROOT / "results" / "merged_data"
 
-OUTPUT_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =====================================================================
@@ -48,11 +45,7 @@ ORIENTATION_TOLERANCE_MS = 100
 # =====================================================================
 
 FOLDERS = sorted(
-    [
-        d.name
-        for d in DATA_DIR.iterdir()
-        if d.is_dir() and "degree" in d.name.lower()
-    ]
+    [d.name for d in DATA_DIR.iterdir() if d.is_dir() and "degree" in d.name.lower()]
 )
 
 
@@ -60,14 +53,13 @@ print("=" * 70)
 print(" GNSS + Orientation Merge")
 print("=" * 70)
 
-print(
-    f"\nFound {len(FOLDERS)} session folders."
-)
+print(f"\nFound {len(FOLDERS)} session folders.")
 
 
 # =====================================================================
 # SESSION NAME PARSER
 # =====================================================================
+
 
 def parse_session(name):
     """
@@ -84,42 +76,24 @@ def parse_session(name):
     """
 
     try:
-
-        parts = (
-            name
-            .replace("_degree_", "_")
-            .replace("_facing", "")
-            .split("_")
-        )
+        parts = name.replace("_degree_", "_").replace("_facing", "").split("_")
 
         angle = int(parts[0])
 
-        facing = (
-            parts[1]
-            if len(parts) > 1
-            else "unknown"
-        )
+        facing = parts[1] if len(parts) > 1 else "unknown"
 
-        phone_roll = (
-            parts[2]
-            if len(parts) > 2
-            else "unknown"
-        )
+        phone_roll = parts[2] if len(parts) > 2 else "unknown"
 
         return angle, facing, phone_roll
 
     except Exception:
-
-        return (
-            np.nan,
-            "unknown",
-            "unknown"
-        )
+        return (np.nan, "unknown", "unknown")
 
 
 # =====================================================================
 # DEVICE IDENTIFICATION
 # =====================================================================
+
 
 def get_device_id(folder_name):
     """
@@ -158,67 +132,44 @@ all_merged = []
 
 
 for folder_name in FOLDERS:
-
     print("\n" + "-" * 70)
     print(f"Processing: {folder_name}")
     print("-" * 70)
 
     session_path = DATA_DIR / folder_name
 
-    status_path = (
-        session_path /
-        "Status.csv"
-    )
+    status_path = session_path / "Status.csv"
 
-    orient_path = (
-        session_path /
-        "OrientationDeg.csv"
-    )
-
+    orient_path = session_path / "OrientationDeg.csv"
 
     # =================================================================
     # CHECK FILES
     # =================================================================
 
     if not status_path.exists():
-
-        print(
-            f"  WARNING: Missing {status_path}"
-        )
+        print(f"  WARNING: Missing {status_path}")
 
         continue
-
 
     if not orient_path.exists():
-
-        print(
-            f"  WARNING: Missing {orient_path}"
-        )
+        print(f"  WARNING: Missing {orient_path}")
 
         continue
-
 
     # =================================================================
     # READ STATUS
     # =================================================================
 
-    status = pd.read_csv(
-        status_path
-    )
-
+    status = pd.read_csv(status_path)
 
     # -----------------------------------------------------------------
     # Validate column count
     # -----------------------------------------------------------------
 
     if len(status.columns) != 14:
-
         raise ValueError(
-            f"{status_path} has "
-            f"{len(status.columns)} columns; "
-            f"expected 14."
+            f"{status_path} has {len(status.columns)} columns; expected 14."
         )
-
 
     status.columns = [
         "_type",
@@ -237,11 +188,7 @@ for folder_name in FOLDERS:
         "BasebandCn0DbHz",
     ]
 
-
-    status = status.drop(
-        columns=["_type"]
-    )
-
+    status = status.drop(columns=["_type"])
 
     # -----------------------------------------------------------------
     # Convert numeric columns
@@ -263,32 +210,19 @@ for folder_name in FOLDERS:
         "BasebandCn0DbHz",
     ]
 
-
     for col in numeric_status:
-
-        status[col] = pd.to_numeric(
-            status[col],
-            errors="coerce"
-        )
-
+        status[col] = pd.to_numeric(status[col], errors="coerce")
 
     # =================================================================
     # READ ORIENTATION
     # =================================================================
 
-    orient = pd.read_csv(
-        orient_path
-    )
-
+    orient = pd.read_csv(orient_path)
 
     if len(orient.columns) != 7:
-
         raise ValueError(
-            f"{orient_path} has "
-            f"{len(orient.columns)} columns; "
-            f"expected 7."
+            f"{orient_path} has {len(orient.columns)} columns; expected 7."
         )
-
 
     orient.columns = [
         "_type",
@@ -300,11 +234,7 @@ for folder_name in FOLDERS:
         "CalibrationAccuracy",
     ]
 
-
-    orient = orient.drop(
-        columns=["_type"]
-    )
-
+    orient = orient.drop(columns=["_type"])
 
     numeric_orientation = [
         "utcTimeMillis",
@@ -315,49 +245,26 @@ for folder_name in FOLDERS:
         "CalibrationAccuracy",
     ]
 
-
     for col in numeric_orientation:
-
-        orient[col] = pd.to_numeric(
-            orient[col],
-            errors="coerce"
-        )
-
+        orient[col] = pd.to_numeric(orient[col], errors="coerce")
 
     # =================================================================
     # REMOVE INVALID TIMESTAMPS
     # =================================================================
 
-    status = status.dropna(
-        subset=["UnixTimeMillis"]
-    ).copy()
+    status = status.dropna(subset=["UnixTimeMillis"]).copy()
 
-    orient = orient.dropna(
-        subset=["utcTimeMillis"]
-    ).copy()
+    orient = orient.dropna(subset=["utcTimeMillis"]).copy()
 
+    status["UnixTimeMillis"] = status["UnixTimeMillis"].astype(np.int64)
 
-    status["UnixTimeMillis"] = (
-        status["UnixTimeMillis"]
-        .astype(np.int64)
-    )
-
-    orient["utcTimeMillis"] = (
-        orient["utcTimeMillis"]
-        .astype(np.int64)
-    )
-
+    orient["utcTimeMillis"] = orient["utcTimeMillis"].astype(np.int64)
 
     # =================================================================
     # SORT ORIENTATION
     # =================================================================
 
-    orient = (
-        orient
-        .sort_values("utcTimeMillis")
-        .reset_index(drop=True)
-    )
-
+    orient = orient.sort_values("utcTimeMillis").reset_index(drop=True)
 
     # -----------------------------------------------------------------
     # Remove exact duplicate orientation timestamps.
@@ -365,31 +272,15 @@ for folder_name in FOLDERS:
     # We keep the LAST measurement at an identical timestamp.
     # -----------------------------------------------------------------
 
-    orient = (
-        orient
-        .drop_duplicates(
-            subset=["utcTimeMillis"],
-            keep="last"
-        )
-    )
-
+    orient = orient.drop_duplicates(subset=["utcTimeMillis"], keep="last")
 
     # =================================================================
     # SORT STATUS / ORIENTATION
     # =================================================================
 
-    status = (
-        status
-        .sort_values("UnixTimeMillis")
-        .reset_index(drop=True)
-    )
+    status = status.sort_values("UnixTimeMillis").reset_index(drop=True)
 
-    orient = (
-        orient
-        .sort_values("utcTimeMillis")
-        .reset_index(drop=True)
-    )
-
+    orient = orient.sort_values("utcTimeMillis").reset_index(drop=True)
 
     # =================================================================
     # MERGE
@@ -404,29 +295,19 @@ for folder_name in FOLDERS:
         direction="nearest",
     )
 
-
     # =================================================================
     # ORIENTATION SYNCHRONIZATION ERROR
     # =================================================================
 
-    merged["orientation_dt_ms"] = (
-        merged["UnixTimeMillis"] - merged["utcTimeMillis"]
-    )
-
+    merged["orientation_dt_ms"] = merged["UnixTimeMillis"] - merged["utcTimeMillis"]
 
     # =================================================================
     # SESSION METADATA
     # =================================================================
 
-    merged["session_id"] = (
-        folder_name
-    )
+    merged["session_id"] = folder_name
 
-
-    angle, facing, phone_roll = (
-        parse_session(folder_name)
-    )
-
+    angle, facing, phone_roll = parse_session(folder_name)
 
     merged["tilt_angle"] = angle
 
@@ -434,15 +315,11 @@ for folder_name in FOLDERS:
 
     merged["phone_roll"] = phone_roll
 
-
     # =================================================================
     # DEVICE ID
     # =================================================================
 
-    merged["device_id"] = (
-        get_device_id(folder_name)
-    )
-
+    merged["device_id"] = get_device_id(folder_name)
 
     # =================================================================
     # SIGNAL IDENTITY
@@ -466,87 +343,43 @@ for folder_name in FOLDERS:
         + "_"
         + merged["session_id"].astype(str)
         + "_"
-        + merged["ConstellationType"]
-            .fillna(-1)
-            .astype(int)
-            .astype(str)
+        + merged["ConstellationType"].fillna(-1).astype(int).astype(str)
         + "_"
-        + merged["Svid"]
-            .fillna(-1)
-            .astype(int)
-            .astype(str)
+        + merged["Svid"].fillna(-1).astype(int).astype(str)
         + "_"
-        + merged["CarrierFrequencyHz"]
-            .fillna(-1)
-            .astype(np.int64)
-            .astype(str)
+        + merged["CarrierFrequencyHz"].fillna(-1).astype(np.int64).astype(str)
     )
-
 
     # =================================================================
     # SESSION STATISTICS
     # =================================================================
 
-    matched = (
-        merged["utcTimeMillis"]
-        .notna()
-        .sum()
-    )
+    matched = merged["utcTimeMillis"].notna().sum()
 
     total = len(merged)
 
-    match_percent = (
-        100.0 * matched / total
-        if total > 0
-        else 0.0
-    )
+    match_percent = 100.0 * matched / total if total > 0 else 0.0
 
+    print(f"  Status rows:       {len(status):,}")
 
-    print(
-        f"  Status rows:       {len(status):,}"
-    )
+    print(f"  Merged rows:       {len(merged):,}")
 
-    print(
-        f"  Merged rows:       {len(merged):,}"
-    )
-
-    print(
-        f"  Orientation match: "
-        f"{match_percent:.2f}%"
-    )
-
+    print(f"  Orientation match: {match_percent:.2f}%")
 
     if matched > 0:
+        abs_dt = merged["orientation_dt_ms"].abs()
 
-        abs_dt = (
-            merged["orientation_dt_ms"]
-            .abs()
-        )
+        print(f"  |dt| median:       {abs_dt.median():.1f} ms")
 
+        print(f"  |dt| 95th pct:     {abs_dt.quantile(0.95):.1f} ms")
 
-        print(
-            f"  |dt| median:       "
-            f"{abs_dt.median():.1f} ms"
-        )
-
-        print(
-            f"  |dt| 95th pct:     "
-            f"{abs_dt.quantile(0.95):.1f} ms"
-        )
-
-        print(
-            f"  |dt| max:          "
-            f"{abs_dt.max():.1f} ms"
-        )
-
+        print(f"  |dt| max:          {abs_dt.max():.1f} ms")
 
     # =================================================================
     # SAVE SESSION
     # =================================================================
 
-    all_merged.append(
-        merged
-    )
+    all_merged.append(merged)
 
 
 # =====================================================================
@@ -554,57 +387,40 @@ for folder_name in FOLDERS:
 # =====================================================================
 
 if not all_merged:
-
-    raise RuntimeError(
-        "No sessions were successfully merged."
-    )
+    raise RuntimeError("No sessions were successfully merged.")
 
 
 # =====================================================================
 # CONCATENATE
 # =====================================================================
 
-full = pd.concat(
-    all_merged,
-    ignore_index=True
-)
+full = pd.concat(all_merged, ignore_index=True)
 
 
 # =====================================================================
 # FINAL SORT
 # =====================================================================
 
-full = (
-    full
-    .sort_values(
-        [
-            "device_id",
-            "session_id",
-            "UnixTimeMillis",
-            "ConstellationType",
-            "Svid",
-            "CarrierFrequencyHz",
-        ]
-    )
-    .reset_index(drop=True)
-)
+full = full.sort_values(
+    [
+        "device_id",
+        "session_id",
+        "UnixTimeMillis",
+        "ConstellationType",
+        "Svid",
+        "CarrierFrequencyHz",
+    ]
+).reset_index(drop=True)
 
 
 # =====================================================================
 # SAVE
 # =====================================================================
 
-output_path = (
-    OUTPUT_DIR /
-    "combined_corpus.parquet"
-)
+output_path = OUTPUT_DIR / "combined_corpus.parquet"
 
 
-full.to_parquet(
-    output_path,
-    index=False,
-    compression="snappy"
-)
+full.to_parquet(output_path, index=False, compression="snappy")
 
 
 # =====================================================================
@@ -616,35 +432,17 @@ print(" MERGE COMPLETE")
 print("=" * 70)
 
 
-print(
-    f"\nTotal rows: "
-    f"{len(full):,}"
-)
+print(f"\nTotal rows: {len(full):,}")
 
-print(
-    f"Sessions: "
-    f"{full['session_id'].nunique()}"
-)
+print(f"Sessions: {full['session_id'].nunique()}")
 
-print(
-    f"Devices: "
-    f"{full['device_id'].nunique()}"
-)
+print(f"Devices: {full['device_id'].nunique()}")
 
-print(
-    f"Unique signals: "
-    f"{full['signal_id'].nunique():,}"
-)
+print(f"Unique signals: {full['signal_id'].nunique():,}")
 
-print(
-    f"Output: "
-    f"{output_path}"
-)
+print(f"Output: {output_path}")
 
-print(
-    f"File size: "
-    f"{output_path.stat().st_size / 1e6:.1f} MB"
-)
+print(f"File size: {output_path.stat().st_size / 1e6:.1f} MB")
 
 
 # =====================================================================
@@ -653,14 +451,7 @@ print(
 
 print("\nPer-device counts:")
 
-print(
-    full
-    .groupby("device_id")
-    .size()
-    .sort_values(
-        ascending=False
-    )
-)
+print(full.groupby("device_id").size().sort_values(ascending=False))
 
 
 # =====================================================================
@@ -669,29 +460,16 @@ print(
 
 print("\nPer-session counts:")
 
-print(
-    full
-    .groupby("session_id")
-    .size()
-    .sort_values(
-        ascending=False
-    )
-)
+print(full.groupby("session_id").size().sort_values(ascending=False))
 
 
 # =====================================================================
 # ORIENTATION SYNCHRONIZATION
 # =====================================================================
 
-print(
-    "\nOrientation synchronization |dt|:"
-)
+print("\nOrientation synchronization |dt|:")
 
-print(
-    full["orientation_dt_ms"]
-    .abs()
-    .describe()
-)
+print(full["orientation_dt_ms"].abs().describe())
 
 
 # =====================================================================
@@ -724,34 +502,22 @@ epoch_times = (
 )
 
 
-epoch_times["epoch_dt_ms"] = (
-    epoch_times
-    .groupby(
-        [
-            "device_id",
-            "session_id",
-        ]
-    )["UnixTimeMillis"]
-    .diff()
-)
+epoch_times["epoch_dt_ms"] = epoch_times.groupby(
+    [
+        "device_id",
+        "session_id",
+    ]
+)["UnixTimeMillis"].diff()
 
 
-print(
-    "\nEpoch interval statistics:"
-)
+print("\nEpoch interval statistics:")
 
-print(
-    epoch_times["epoch_dt_ms"]
-    .dropna()
-    .describe()
-)
+print(epoch_times["epoch_dt_ms"].dropna().describe())
 
 
 print("\nMedian epoch interval:")
 
-print(
-    f"{epoch_times['epoch_dt_ms'].median():.1f} ms"
-)
+print(f"{epoch_times['epoch_dt_ms'].median():.1f} ms")
 
 
 # =====================================================================
@@ -761,12 +527,7 @@ print(
 print("\nColumns:")
 
 for col in full.columns:
-
-    print(
-        f"  {col}"
-    )
+    print(f"  {col}")
 
 
-print(
-    "\nDone."
-)
+print("\nDone.")

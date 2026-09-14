@@ -15,6 +15,7 @@ merged_data/
 test.py
 .vscode
 notebooks/
+results/
 
 # AI
 AGENTS.md 
