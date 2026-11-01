@@ -8,11 +8,15 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb>=2.0.0",
     "fastparquet>=2026.5.0",
+    "jupyterlab>=4.6.3",
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
     "pandas-stubs>=3.0.5.260730",
+    "polars>=2.1.0",
+    "pyarrow>=26.0.0",
     "scikit-learn>=1.9.0",
     "seaborn>=0.13.2",
 ]
@@ -23,3 +27,11 @@ isro-project = "isro_project:main"
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "nbconvert>=7.17.1",
+    "reportlab>=5.0.1",
+]

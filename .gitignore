@@ -1,23 +1,45 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
+# Byte-compiled / optimized Python files
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
 build/
 dist/
+*.egg-info/
+.eggs/
 wheels/
-*.egg-info
+
+# Python test / tooling caches
+.pytest_cache/
+.ruff_cache/
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
+ENV/
 
-# Custom
-data/
-merged_data/
-test.py
-.vscode
+# IDEs / editors
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
 notebooks/
+
+# Project-specific data and outputs
+data/
 results/
 
-# AI
-AGENTS.md 
+# Local / temporary files
+test.py
+
+# Project / planning files
+.codegraph/
+.planning/
+
+# AI / agent instruction files
+AGENTS.md
 CLAUDE.md
-INSTRUCTIONS.md 
+INSTRUCTIONS.md

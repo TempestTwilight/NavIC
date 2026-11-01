@@ -1,0 +1,21 @@
+[
+  "elevation_sin",
+  "elevation_cos",
+  "rel_az_sin",
+  "rel_az_cos",
+  "airmass",
+  "is_above_horizon",
+  "freq_ghz",
+  "is_gps",
+  "is_glonass",
+  "is_galileo",
+  "is_beidou",
+  "is_qzss",
+  "is_navic",
+  "rel_az_x_el",
+  "navic_x_airmass",
+  "gps_x_airmass",
+  "galileo_x_airmass",
+  "tilt_angle_sin",
+  "tilt_angle_cos"
+]
