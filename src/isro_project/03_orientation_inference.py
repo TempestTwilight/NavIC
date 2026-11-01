@@ -145,61 +145,69 @@ def load_session_sky(session_name: str) -> pd.DataFrame:
 def engineer_for_orientation(df: pd.DataFrame, target_yaw: float) -> np.ndarray:
     """Engineer features for a specific phone orientation (yaw angle).
 
-    [Strategy 1 — Yaw-Agnostic]
-    `yaw_sin` / `yaw_cos` are intentionally excluded. Only `rel_az_sin` /
-    `rel_az_cos` (satellite azimuth relative to phone heading) are used
-    for directional signal, making the feature set device-agnostic.
+    Uses physics-based features only: incidence angle (sat vector · antenna normal),
+    Kasten-Young airmass, frequency path loss, constellation IDs.
 
-    Feature keys here must exactly match `feature_cols` saved by
-    train_orientation_model.py. In particular:
-      - No current/lagged/delta/slope C/N0 (not knowable for a
-        hypothetical orientation).
-      - No SignalCount / UsedInFix / HasAlmanacData / HasEphemerisData
-        (describe fix state at the phone's ACTUAL current orientation,
-        not a candidate one).
-      - No pitch_sin/cos or roll_sin/cos — the model was trained with a
-        single assumed-flat tilt (tilt_angle = 0) to match the
-        assumption made here, so pitch/roll are never used by either
-        side.
-      - `rel_az_x_el` = rel_az_cos * elevation_sin (canonical
-        definition — keep in sync with train_orientation_model.py).
+    Feature keys must exactly match `feature_cols` in train_orientation_model.py.
     """
     elev_rad = np.radians(df["ElevationDegrees"].values)
     az_rad = np.radians(df["AzimuthDegrees"].values)
     rel_az = (df["AzimuthDegrees"].values - target_yaw) % 360
     rel_az_rad = np.radians(rel_az)
+    yaw_rad = np.radians(target_yaw)
+
+    # Assume flat phone (pitch=0, roll=0) for all candidate orientations
+    pitch_rad = 0.0
+    roll_rad = 0.0
+
+    # Satellite line-of-sight unit vector (ENU)
+    s_east = np.cos(elev_rad) * np.sin(az_rad)
+    s_north = np.cos(elev_rad) * np.cos(az_rad)
+    s_up = np.sin(elev_rad)
+
+    # Antenna normal unit vector (ENU) for candidate yaw
+    n_east = np.sin(roll_rad) * np.sin(yaw_rad) + np.cos(roll_rad) * np.sin(pitch_rad) * np.cos(yaw_rad)
+    n_north = -np.sin(roll_rad) * np.cos(yaw_rad) + np.cos(roll_rad) * np.sin(pitch_rad) * np.sin(yaw_rad)
+    n_up = np.cos(roll_rad) * np.cos(pitch_rad)
+
+    # Incidence angle cosine
+    cos_inc = np.clip(s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0)
+    inc_deg = np.degrees(np.arccos(cos_inc))
 
     feat = {}
+    feat["cos_inc"] = cos_inc
+    feat["inc_deg"] = inc_deg
     feat["elevation_sin"] = np.sin(elev_rad)
     feat["elevation_cos"] = np.cos(elev_rad)
+    feat["is_above_horizon"] = (df["ElevationDegrees"].values > 0).astype(float)
     feat["rel_az_sin"] = np.sin(rel_az_rad)
     feat["rel_az_cos"] = np.cos(rel_az_rad)
 
-    safe_elev = np.maximum(elev_rad, np.radians(1))
-    feat["airmass"] = 1.0 / np.sin(safe_elev)
+    # Airmass models
+    elev_clipped = np.clip(df["ElevationDegrees"].values, 1.0, 89.0)
+    feat["airmass_simple"] = 1.0 / np.sin(np.radians(elev_clipped))
+    feat["airmass_ky"] = 1.0 / (
+        np.sin(elev_rad) + 0.15 * (df["ElevationDegrees"].values + 3.885) ** (-1.25)
+    )
 
-    feat["is_above_horizon"] = (df["ElevationDegrees"].values > 0).astype(float)
+    # Frequency features
+    feat["freq_ghz"] = df["CarrierFrequencyHz"].values / 1e9
+    feat["freq_loss_db"] = 20.0 * np.log10(df["CarrierFrequencyHz"].values / 1575420000.0)
 
-    for ctype, name in [(1, "gps"), (3, "glonass"), (4, "qzss"), (5, "beidou"), (6, "galileo"), (7, "navic")]:
+    # Constellation indicators (numeric IDs)
+    for ctype, name in [(1, "gps"), (2, "sbas"), (3, "glonass"), (4, "qzss"), 
+                        (5, "beidou"), (6, "galileo"), (7, "navic")]:
         feat[f"is_{name}"] = (df["ConstellationType"].values == ctype).astype(float)
 
-    # Canonical definition — must match train_orientation_model.add_features()
+    # Interaction terms
     feat["rel_az_x_el"] = feat["rel_az_cos"] * feat["elevation_sin"]
-    feat["navic_x_airmass"] = feat["is_navic"] * feat["airmass"]
-    feat["gps_x_airmass"] = feat["is_gps"] * feat["airmass"]
-    feat["galileo_x_airmass"] = feat["is_galileo"] * feat["airmass"]
+    feat["cos_inc_x_airmass"] = feat["cos_inc"] * feat["airmass_ky"]
+    feat["navic_x_airmass"] = feat["is_navic"] * feat["airmass_ky"]
+    feat["gps_x_airmass"] = feat["is_gps"] * feat["airmass_ky"]
+    feat["galileo_x_airmass"] = feat["is_galileo"] * feat["airmass_ky"]
+    feat["freq_loss_x_elev"] = feat["freq_loss_db"] * feat["elevation_sin"]
 
-    feat["freq_ghz"] = df["CarrierFrequencyHz"].values / 1e9
-
-    # Scalar features, broadcast to full array size.
-    # Phone assumed held flat (tilt = 0) for every candidate orientation,
-    # matching training's flat-tilt assumption: sin(0)=0, cos(0)=1.
-    n = len(df)
-    feat["tilt_angle_sin"] = np.full(n, 0.0)
-    feat["tilt_angle_cos"] = np.full(n, 1.0)
-
-    # Fail loudly rather than silently mispredicting on a feature-set
-    # drift between this function and the trained model.
+    # Validate feature set matches trained model
     expected = set(FEATURE_COLS)
     built = set(feat.keys())
     missing = expected - built

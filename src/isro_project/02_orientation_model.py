@@ -127,6 +127,8 @@ def add_features(df, assume_flat_tilt=True):
         "ElevationDegrees",
         "CarrierFrequencyHz",
         "yawDeg",
+        "pitchDeg",
+        "rollDeg",
     ]
 
     for col in numeric_cols:
@@ -134,93 +136,95 @@ def add_features(df, assume_flat_tilt=True):
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # --------------------------------------------------------
-    # Angles
+    # Angles to radians
     # --------------------------------------------------------
 
     az = np.deg2rad(df["AzimuthDegrees"])
     el = np.deg2rad(df["ElevationDegrees"])
     yaw = np.deg2rad(df["yawDeg"])
+    pitch = np.deg2rad(df["pitchDeg"])
+    roll = np.deg2rad(df["rollDeg"])
 
     # --------------------------------------------------------
-    # Elevation
+    # Satellite Line-of-Sight Unit Vector (ENU coordinates)
+    # --------------------------------------------------------
+
+    s_east = np.cos(el) * np.sin(az)
+    s_north = np.cos(el) * np.cos(az)
+    s_up = np.sin(el)
+
+    # --------------------------------------------------------
+    # Phone Antenna Normal Unit Vector (ENU coordinates)
+    # Transformed from body Z-axis [0,0,1] via Euler angles
+    # --------------------------------------------------------
+
+    n_east = np.sin(roll) * np.sin(yaw) + np.cos(roll) * np.sin(pitch) * np.cos(yaw)
+    n_north = -np.sin(roll) * np.cos(yaw) + np.cos(roll) * np.sin(pitch) * np.sin(yaw)
+    n_up = np.cos(roll) * np.cos(pitch)
+
+    # --------------------------------------------------------
+    # Antenna Incidence Angle (dot product s·n)
+    # --------------------------------------------------------
+
+    df["cos_inc"] = np.clip(s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0)
+    df["inc_deg"] = np.degrees(np.arccos(df["cos_inc"]))
+
+    # --------------------------------------------------------
+    # Elevation features
     # --------------------------------------------------------
 
     df["elevation_sin"] = np.sin(el)
     df["elevation_cos"] = np.cos(el)
-
-    # Above horizon
     df["is_above_horizon"] = (df["ElevationDegrees"] > 0).astype(float)
 
     # --------------------------------------------------------
-    # Relative azimuth
-    # Satellite direction relative to phone heading.
+    # Relative azimuth (satellite bearing minus phone yaw)
     # --------------------------------------------------------
 
     rel_az = az - yaw
-
     df["rel_az_sin"] = np.sin(rel_az)
     df["rel_az_cos"] = np.cos(rel_az)
 
     # --------------------------------------------------------
-    # Airmass
+    # Tropospheric Airmass (Kasten-Young model)
     # --------------------------------------------------------
 
     elevation_clipped = np.clip(df["ElevationDegrees"].values, 1.0, 89.0)
-    df["airmass"] = 1.0 / np.sin(np.deg2rad(elevation_clipped))
+    df["airmass_simple"] = 1.0 / np.sin(np.deg2rad(elevation_clipped))
+    df["airmass_ky"] = 1.0 / (
+        np.sin(el) + 0.15 * (df["ElevationDegrees"].values + 3.885) ** (-1.25)
+    )
 
     # --------------------------------------------------------
-    # Frequency
+    # Frequency features
     # --------------------------------------------------------
 
     df["freq_ghz"] = df["CarrierFrequencyHz"] / 1e9
+    # Relative path loss in dB (relative to L1 1575.42 MHz)
+    df["freq_loss_db"] = 20.0 * np.log10(df["CarrierFrequencyHz"].values / 1575420000.0)
 
     # --------------------------------------------------------
-    # Constellation one-hot features
+    # Constellation one-hot features (FIXED: use numeric IDs)
     # --------------------------------------------------------
 
-    constellation = df["ConstellationType"].astype(str).str.lower()
-
-    df["is_gps"] = constellation.str.contains("gps").astype(float)
-    df["is_glonass"] = constellation.str.contains("glonass").astype(float)
-    df["is_galileo"] = constellation.str.contains("galileo").astype(float)
-    df["is_beidou"] = constellation.str.contains("beidou|bds").astype(float)
-    df["is_qzss"] = constellation.str.contains("qzss").astype(float)
-    df["is_navic"] = constellation.str.contains("navic|irnss").astype(float)
+    df["is_gps"] = (df["ConstellationType"] == 1).astype(float)
+    df["is_sbas"] = (df["ConstellationType"] == 2).astype(float)
+    df["is_glonass"] = (df["ConstellationType"] == 3).astype(float)
+    df["is_qzss"] = (df["ConstellationType"] == 4).astype(float)
+    df["is_beidou"] = (df["ConstellationType"] == 5).astype(float)
+    df["is_galileo"] = (df["ConstellationType"] == 6).astype(float)
+    df["is_navic"] = (df["ConstellationType"] == 7).astype(float)
 
     # --------------------------------------------------------
-    # Interactions
-    #
-    # CANONICAL DEFINITION — must match
-    # step10_inference.engineer_for_orientation() exactly.
-    # (Earlier scripts in this project used rel_az_sin here; this
-    # is now standardized to rel_az_cos across training AND
-    # inference.)
+    # Interaction terms (physics-based)
     # --------------------------------------------------------
 
     df["rel_az_x_el"] = df["rel_az_cos"] * df["elevation_sin"]
-    df["navic_x_airmass"] = df["is_navic"] * df["airmass"]
-    df["gps_x_airmass"] = df["is_gps"] * df["airmass"]
-    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass"]
-
-    # --------------------------------------------------------
-    # Tilt (single scalar assumption, matches inference)
-    #
-    # Real tilt_angle column if present; otherwise assume flat
-    # (0 degrees) exactly as step10_inference.py does for every
-    # candidate orientation.
-    # --------------------------------------------------------
-
-    if "tilt_angle" in df.columns:
-        tilt = pd.to_numeric(df["tilt_angle"], errors="coerce")
-    elif assume_flat_tilt:
-        tilt = pd.Series(0.0, index=df.index)
-    else:
-        tilt = None
-
-    if tilt is not None:
-        tilt_rad = np.deg2rad(tilt)
-        df["tilt_angle_sin"] = np.sin(tilt_rad)
-        df["tilt_angle_cos"] = np.cos(tilt_rad)
+    df["cos_inc_x_airmass"] = df["cos_inc"] * df["airmass_ky"]
+    df["navic_x_airmass"] = df["is_navic"] * df["airmass_ky"]
+    df["gps_x_airmass"] = df["is_gps"] * df["airmass_ky"]
+    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass_ky"]
+    df["freq_loss_x_elev"] = df["freq_loss_db"] * df["elevation_sin"]
 
     return df
 
@@ -286,27 +290,37 @@ df = add_features(df)
 # ============================================================
 
 feature_cols = [
+    # Core physics-based geometry
+    "cos_inc",
+    "inc_deg",
     "elevation_sin",
     "elevation_cos",
+    "is_above_horizon",
+    # Relative azimuth
     "rel_az_sin",
     "rel_az_cos",
-    "airmass",
-    "is_above_horizon",
+    # Atmospheric path
+    "airmass_simple",
+    "airmass_ky",
+    # Signal parameters
     "freq_ghz",
+    "freq_loss_db",
+    # Constellation indicators
     "is_gps",
+    "is_sbas",
     "is_glonass",
-    "is_galileo",
-    "is_beidou",
     "is_qzss",
+    "is_beidou",
+    "is_galileo",
     "is_navic",
+    # Interaction terms
     "rel_az_x_el",
+    "cos_inc_x_airmass",
     "navic_x_airmass",
     "gps_x_airmass",
     "galileo_x_airmass",
+    "freq_loss_x_elev",
 ]
-
-if "tilt_angle_sin" in df.columns:
-    feature_cols += ["tilt_angle_sin", "tilt_angle_cos"]
 
 
 # ============================================================

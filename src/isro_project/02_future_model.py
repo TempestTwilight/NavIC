@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import json
 import warnings
@@ -105,6 +104,10 @@ def add_static_features(df):
 
     el_clipped = np.clip(df["ElevationDegrees"].values, 1.0, 89.0)
     df["airmass"] = 1.0 / np.sin(np.deg2rad(el_clipped))
+    df["airmass_ky"] = 1.0 / (
+        np.sin(el)
+        + 0.15 * np.power(np.clip(df["ElevationDegrees"].values, 0.0, 90.0) + 3.885, -1.25)
+    )
 
     df["pitch_sin"] = np.sin(pitch)
     df["pitch_cos"] = np.cos(pitch)
@@ -112,19 +115,24 @@ def add_static_features(df):
     df["roll_cos"] = np.cos(roll)
 
     df["freq_ghz"] = df["CarrierFrequencyHz"] / 1e9
+    df["freq_loss_db"] = 20.0 * np.log10(
+        np.clip(df["CarrierFrequencyHz"].values, 1e8, 1e11) / 1575420000.0
+    )
 
-    constellation = df["ConstellationType"].astype(str).str.lower()
-    df["is_gps"] = constellation.str.contains("gps").astype(float)
-    df["is_glonass"] = constellation.str.contains("glonass").astype(float)
-    df["is_galileo"] = constellation.str.contains("galileo").astype(float)
-    df["is_beidou"] = constellation.str.contains("beidou|bds").astype(float)
-    df["is_qzss"] = constellation.str.contains("qzss").astype(float)
-    df["is_navic"] = constellation.str.contains("navic|irnss").astype(float)
+    ctype = pd.to_numeric(df["ConstellationType"], errors="coerce").fillna(-1).astype(int)
+    df["is_gps"] = (ctype == 1).astype(float)
+    df["is_sbas"] = (ctype == 2).astype(float)
+    df["is_glonass"] = (ctype == 3).astype(float)
+    df["is_qzss"] = (ctype == 4).astype(float)
+    df["is_beidou"] = (ctype == 5).astype(float)
+    df["is_galileo"] = (ctype == 6).astype(float)
+    df["is_navic"] = (ctype == 7).astype(float)
 
     df["rel_az_x_el"] = df["rel_az_cos"] * df["elevation_sin"]
-    df["navic_x_airmass"] = df["is_navic"] * df["airmass"]
-    df["gps_x_airmass"] = df["is_gps"] * df["airmass"]
-    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass"]
+    df["navic_x_airmass"] = df["is_navic"] * df["airmass_ky"]
+    df["gps_x_airmass"] = df["is_gps"] * df["airmass_ky"]
+    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass_ky"]
+    df["freq_loss_x_elev"] = df["freq_loss_db"] * df["elevation_sin"]
 
     if "tilt_angle" in df.columns:
         tilt = pd.to_numeric(df["tilt_angle"], errors="coerce")
@@ -352,13 +360,16 @@ feature_cols = [
     "rel_az_sin",
     "rel_az_cos",
     "airmass",
+    "airmass_ky",
     "is_above_horizon",
     "freq_ghz",
+    "freq_loss_db",
     "pitch_sin",
     "pitch_cos",
     "roll_sin",
     "roll_cos",
     "is_gps",
+    "is_sbas",
     "is_glonass",
     "is_galileo",
     "is_beidou",
@@ -368,6 +379,7 @@ feature_cols = [
     "navic_x_airmass",
     "gps_x_airmass",
     "galileo_x_airmass",
+    "freq_loss_x_elev",
     "SignalCount",
     "UsedInFix",
     "HasAlmanacData",
