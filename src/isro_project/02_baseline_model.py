@@ -48,23 +48,16 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .config import (
+    MERGED_CORPUS,
+    BASELINE_ARTIFACTS,
+    RANDOM_STATE,
+    HORIZON_MS,
+    TARGET_TOLERANCE_MS,
+    ensure_dirs,
+)
 
 warnings.filterwarnings("ignore")
-
-
-# =====================================================================
-# PATHS
-# =====================================================================
-
-PROJECT_ROOT = Path().resolve()
-
-RESULTS_DIR = PROJECT_ROOT / "results"
-
-DATA_PATH = RESULTS_DIR / "merged_data" / "combined_corpus.parquet"
-
-OUTPUT_DIR = PROJECT_ROOT / "model" / "baseline_artifacts"
-
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =====================================================================
@@ -76,9 +69,6 @@ EPOCH_MS = 1000
 
 # Predict one epoch into the future.
 HORIZON_EPOCHS = 1
-
-HORIZON_MS = EPOCH_MS * HORIZON_EPOCHS
-
 
 # Allowed timestamp error when finding lag/target measurements.
 #
@@ -99,7 +89,7 @@ RF_PARAMS = {
     "n_estimators": 150,
     "max_depth": 8,
     "min_samples_leaf": 30,
-    "random_state": 42,
+    "random_state": RANDOM_STATE,
     "n_jobs": -1,
 }
 
@@ -125,11 +115,13 @@ print("=" * 75)
 print(" Temporal GNSS C/N0 Prediction")
 print("=" * 75)
 
+ensure_dirs()
+
 print("\nLoading:")
 
-print(DATA_PATH)
+print(MERGED_CORPUS)
 
-df = pd.read_parquet(DATA_PATH)
+df = pd.read_parquet(MERGED_CORPUS)
 
 print(f"\nLoaded rows: {len(df):,}")
 
@@ -978,7 +970,7 @@ rf_final.fit(X_rf, y_rf)
 #     original script. The fitted objects are `ridge_final` (a
 #     Pipeline) and `rf_final` (a RandomForestRegressor).
 #   - `ARTIFACT_DIR` was never defined. The correct output location
-#     is `OUTPUT_DIR`.
+#     is `BASELINE_ARTIFACTS`.
 #   - Ridge coefficients live on the inner "ridge" step of the
 #     pipeline, not on the pipeline object itself.
 # =====================================================================
@@ -1038,7 +1030,7 @@ ridge_coefficients["abs_coefficient"] = ridge_coefficients["coefficient"].abs()
 
 ridge_coefficients = ridge_coefficients.sort_values("abs_coefficient", ascending=False)
 
-ridge_coefficients.to_csv(OUTPUT_DIR / "ridge_coefficients.csv", index=False)
+ridge_coefficients.to_csv(BASELINE_ARTIFACTS / "ridge_coefficients.csv", index=False)
 
 print("\nTop Ridge coefficients:")
 print(ridge_coefficients.head(20).to_string(index=False))
@@ -1071,7 +1063,7 @@ rf_importance_df = pd.DataFrame(
 
 rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
 
-rf_importance_df.to_csv(OUTPUT_DIR / "rf_importance.csv", index=False)
+rf_importance_df.to_csv(BASELINE_ARTIFACTS / "rf_importance.csv", index=False)
 
 print("\nTop Random Forest features:")
 print(rf_importance_df.head(20).to_string(index=False))
@@ -1246,17 +1238,17 @@ if len(selection_df) > 0:
 print("\n--- Saving artifacts ---")
 
 
-joblib.dump(ridge_final, OUTPUT_DIR / "ridge_temporal_1s.joblib")
+joblib.dump(ridge_final, BASELINE_ARTIFACTS / "ridge_temporal_1s.joblib")
 
 
-joblib.dump(rf_final, OUTPUT_DIR / "rf_temporal_1s.joblib")
+joblib.dump(rf_final, BASELINE_ARTIFACTS / "rf_temporal_1s.joblib")
 
 
 # ---------------------------------------------------------------------
 # Feature list
 # ---------------------------------------------------------------------
 
-with open(OUTPUT_DIR / "feature_cols.json", "w") as f:
+with open(BASELINE_ARTIFACTS / "feature_cols.json", "w") as f:
     json.dump(feature_cols, f, indent=2)
 
 
@@ -1291,7 +1283,7 @@ for fold, (rmse, mae, r2) in enumerate(rf_scores, start=1):
     )
 
 
-pd.DataFrame(cv_rows).to_csv(OUTPUT_DIR / "cv_results.csv", index=False)
+pd.DataFrame(cv_rows).to_csv(BASELINE_ARTIFACTS / "cv_results.csv", index=False)
 
 
 # ---------------------------------------------------------------------
@@ -1299,7 +1291,7 @@ pd.DataFrame(cv_rows).to_csv(OUTPUT_DIR / "cv_results.csv", index=False)
 # ---------------------------------------------------------------------
 
 if len(selection_df) > 0:
-    selection_df.to_parquet(OUTPUT_DIR / "selection_results.parquet", index=False)
+    selection_df.to_parquet(BASELINE_ARTIFACTS / "selection_results.parquet", index=False)
 
 
 # =====================================================================
@@ -1359,6 +1351,6 @@ if len(selection_df) > 0:
 
 print("\nArtifacts:")
 
-print(OUTPUT_DIR)
+print(BASELINE_ARTIFACTS)
 
 print("\nDone.")

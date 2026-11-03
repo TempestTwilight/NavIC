@@ -23,20 +23,24 @@ DUCKDB_TEMP_DIR = Path.home() / "gnss-eda-temp"
 # Sampling configuration
 SAMPLE_SIZE = 100_000
 
-print(PROJECT_ROOT, "\n", PARQUET_DIR, "\n", SAMPLE_DIR, "\n", DATABASE_DIR, "\n", REPORT_DIR)
-
-con = duckdb.connect(
-    str(PROJECT_ROOT / "eda.duckdb")
+print(
+    PROJECT_ROOT,
+    "\n",
+    PARQUET_DIR,
+    "\n",
+    SAMPLE_DIR,
+    "\n",
+    DATABASE_DIR,
+    "\n",
+    REPORT_DIR,
 )
+
+con = duckdb.connect(str(PROJECT_ROOT / "eda.duckdb"))
 
 con.execute("SET memory_limit = '3GB'")
 con.execute("SET threads = 2")
 con.execute("SET preserve_insertion_order = false")
 
-con.execute(
-    f"SET temp_directory = '{DUCKDB_TEMP_DIR}'"
-)
+con.execute(f"SET temp_directory = '{DUCKDB_TEMP_DIR}'")
 
-con.execute(
-    "SET max_temp_directory_size = '20GB'"
-)
+con.execute("SET max_temp_directory_size = '20GB'")

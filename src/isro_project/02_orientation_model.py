@@ -56,28 +56,20 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .config import (
+    MERGED_CORPUS,
+    ORIENTATION_ARTIFACTS,
+    RANDOM_STATE,
+    ensure_dirs,
+)
+
 warnings.filterwarnings("ignore")
-
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-PROJECT_ROOT = Path().resolve()
-
-RESULTS_DIR = PROJECT_ROOT / "results"
-DATA_PATH = RESULTS_DIR / "merged_data" / "combined_corpus.parquet"
-
-ARTIFACT_DIR = PROJECT_ROOT / "model" / "orientation_artifacts"
-
-ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-
-RANDOM_STATE = 42
 
 
 # ============================================================
 # HELPERS
 # ============================================================
+
 
 def rmse(y_true, y_pred):
     return np.sqrt(mean_squared_error(y_true, y_pred))
@@ -166,7 +158,9 @@ def add_features(df, assume_flat_tilt=True):
     # Antenna Incidence Angle (dot product s·n)
     # --------------------------------------------------------
 
-    df["cos_inc"] = np.clip(s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0)
+    df["cos_inc"] = np.clip(
+        s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0
+    )
     df["inc_deg"] = np.degrees(np.arccos(df["cos_inc"]))
 
     # --------------------------------------------------------
@@ -237,9 +231,11 @@ print("=" * 75)
 print(" Orientation-Agnostic GNSS C/N0 Prediction")
 print("=" * 75)
 
-print(f"\nLoading:\n{DATA_PATH}")
+ensure_dirs()
 
-df = pd.read_parquet(DATA_PATH)
+print(f"\nLoading:\n{MERGED_CORPUS}")
+
+df = pd.read_parquet(MERGED_CORPUS)
 
 print(f"\nLoaded rows: {len(df):,}")
 print(f"Sessions: {df['session_id'].nunique()}")
@@ -371,10 +367,12 @@ print("=" * 75)
 ridge_scores = []
 
 for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
-    model = Pipeline([
-        ("scaler", StandardScaler()),
-        ("ridge", Ridge(alpha=10.0)),
-    ])
+    model = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("ridge", Ridge(alpha=10.0)),
+        ]
+    )
 
     model.fit(X.iloc[train_idx], y.iloc[train_idx])
     pred = model.predict(X.iloc[test_idx])
@@ -460,10 +458,12 @@ print("\n" + "=" * 75)
 print(" Training final models")
 print("=" * 75)
 
-ridge_model = Pipeline([
-    ("scaler", StandardScaler()),
-    ("ridge", Ridge(alpha=10.0)),
-])
+ridge_model = Pipeline(
+    [
+        ("scaler", StandardScaler()),
+        ("ridge", Ridge(alpha=10.0)),
+    ]
+)
 ridge_model.fit(X, y)
 
 rf_model = RandomForestRegressor(
@@ -480,14 +480,14 @@ rf_model.fit(X, y)
 # SAVE MODELS
 # ============================================================
 
-joblib.dump(ridge_model, ARTIFACT_DIR / "ridge_orientation.joblib")
-joblib.dump(rf_model, ARTIFACT_DIR / "rf_orientation.joblib")
+joblib.dump(ridge_model, ORIENTATION_ARTIFACTS / "ridge_orientation.joblib")
+joblib.dump(rf_model, ORIENTATION_ARTIFACTS / "rf_orientation.joblib")
 
-with open(ARTIFACT_DIR / "feature_cols.json", "w") as f:
+with open(ORIENTATION_ARTIFACTS / "feature_cols.json", "w") as f:
     json.dump(feature_cols, f, indent=2)
 
-ridge_scores_df.to_csv(ARTIFACT_DIR / "ridge_cv.csv", index=False)
-rf_scores_df.to_csv(ARTIFACT_DIR / "rf_cv.csv", index=False)
+ridge_scores_df.to_csv(ORIENTATION_ARTIFACTS / "ridge_cv.csv", index=False)
+rf_scores_df.to_csv(ORIENTATION_ARTIFACTS / "rf_cv.csv", index=False)
 
 
 # ============================================================
@@ -498,33 +498,35 @@ print("\n--- Feature importance ---")
 
 ridge_coef = np.asarray(ridge_model.named_steps["ridge"].coef_).ravel()
 assert len(ridge_coef) == len(feature_cols), (
-    f"Ridge mismatch: {len(ridge_coef)} coefficients vs "
-    f"{len(feature_cols)} features"
+    f"Ridge mismatch: {len(ridge_coef)} coefficients vs {len(feature_cols)} features"
 )
 
-ridge_coefficients = pd.DataFrame({
-    "feature": feature_cols,
-    "coefficient": ridge_coef,
-})
+ridge_coefficients = pd.DataFrame(
+    {
+        "feature": feature_cols,
+        "coefficient": ridge_coef,
+    }
+)
 ridge_coefficients["abs_coefficient"] = ridge_coefficients["coefficient"].abs()
 ridge_coefficients = ridge_coefficients.sort_values("abs_coefficient", ascending=False)
-ridge_coefficients.to_csv(ARTIFACT_DIR / "ridge_coefficients.csv", index=False)
+ridge_coefficients.to_csv(ORIENTATION_ARTIFACTS / "ridge_coefficients.csv", index=False)
 
 print("\nTop Ridge features:")
 print(ridge_coefficients.head(20).to_string(index=False))
 
 rf_importance = np.asarray(rf_model.feature_importances_).ravel()
 assert len(rf_importance) == len(feature_cols), (
-    f"RF mismatch: {len(rf_importance)} importances vs "
-    f"{len(feature_cols)} features"
+    f"RF mismatch: {len(rf_importance)} importances vs {len(feature_cols)} features"
 )
 
-rf_importance_df = pd.DataFrame({
-    "feature": feature_cols,
-    "importance": rf_importance,
-})
+rf_importance_df = pd.DataFrame(
+    {
+        "feature": feature_cols,
+        "importance": rf_importance,
+    }
+)
 rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
-rf_importance_df.to_csv(ARTIFACT_DIR / "rf_importance.csv", index=False)
+rf_importance_df.to_csv(ORIENTATION_ARTIFACTS / "rf_importance.csv", index=False)
 
 print("\nTop Random Forest features:")
 print(rf_importance_df.head(20).to_string(index=False))
@@ -541,13 +543,25 @@ print(rf_importance_df.head(20).to_string(index=False))
 # ============================================================
 
 EXPECTED_INFERENCE_KEYS = {
-    "elevation_sin", "elevation_cos",
-    "rel_az_sin", "rel_az_cos",
-    "airmass", "is_above_horizon",
+    "elevation_sin",
+    "elevation_cos",
+    "rel_az_sin",
+    "rel_az_cos",
+    "airmass",
+    "is_above_horizon",
     "freq_ghz",
-    "is_gps", "is_glonass", "is_galileo", "is_beidou", "is_qzss", "is_navic",
-    "rel_az_x_el", "navic_x_airmass", "gps_x_airmass", "galileo_x_airmass",
-    "tilt_angle_sin", "tilt_angle_cos",
+    "is_gps",
+    "is_glonass",
+    "is_galileo",
+    "is_beidou",
+    "is_qzss",
+    "is_navic",
+    "rel_az_x_el",
+    "navic_x_airmass",
+    "gps_x_airmass",
+    "galileo_x_airmass",
+    "tilt_angle_sin",
+    "tilt_angle_cos",
 }
 
 trained_keys = set(feature_cols)
@@ -566,4 +580,4 @@ if trained_keys != EXPECTED_INFERENCE_KEYS:
 print("\n" + "=" * 75)
 print(" COMPLETE")
 print("=" * 75)
-print(f"\nArtifacts saved to:\n{ARTIFACT_DIR}")
+print(f"\nArtifacts saved to:\n{ORIENTATION_ARTIFACTS}")

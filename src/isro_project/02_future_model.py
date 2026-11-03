@@ -13,28 +13,14 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-warnings.filterwarnings("ignore")
-
-
-# ============================================================
-# CONFIG
-# ============================================================
-# FIX: paths are now overridable via env vars instead of being
-# hardcoded to one machine.
-
-PROJECT_ROOT = Path().resolve()
-
-RESULTS_DIR = PROJECT_ROOT / "results"
-
-DATA_PATH = RESULTS_DIR / "merged_data" / "combined_corpus.parquet"
-
-ARTIFACT_DIR = PROJECT_ROOT / "model" / "temporal_artifacts"
-
-ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-
-RANDOM_STATE = 42
-HORIZON_MS = 1000
-TARGET_TOLERANCE_MS = 150
+from .config import (
+    MERGED_CORPUS,
+    TEMPORAL_ARTIFACTS,
+    RANDOM_STATE,
+    HORIZON_MS,
+    TARGET_TOLERANCE_MS,
+    ensure_dirs,
+)
 
 SIGNAL_KEYS = [
     "device_id",
@@ -43,6 +29,8 @@ SIGNAL_KEYS = [
     "Svid",
     "CarrierFrequencyHz",
 ]
+
+warnings.filterwarnings("ignore")
 
 
 # ============================================================
@@ -106,7 +94,8 @@ def add_static_features(df):
     df["airmass"] = 1.0 / np.sin(np.deg2rad(el_clipped))
     df["airmass_ky"] = 1.0 / (
         np.sin(el)
-        + 0.15 * np.power(np.clip(df["ElevationDegrees"].values, 0.0, 90.0) + 3.885, -1.25)
+        + 0.15
+        * np.power(np.clip(df["ElevationDegrees"].values, 0.0, 90.0) + 3.885, -1.25)
     )
 
     df["pitch_sin"] = np.sin(pitch)
@@ -119,7 +108,9 @@ def add_static_features(df):
         np.clip(df["CarrierFrequencyHz"].values, 1e8, 1e11) / 1575420000.0
     )
 
-    ctype = pd.to_numeric(df["ConstellationType"], errors="coerce").fillna(-1).astype(int)
+    ctype = (
+        pd.to_numeric(df["ConstellationType"], errors="coerce").fillna(-1).astype(int)
+    )
     df["is_gps"] = (ctype == 1).astype(float)
     df["is_sbas"] = (ctype == 2).astype(float)
     df["is_glonass"] = (ctype == 3).astype(float)
@@ -190,18 +181,20 @@ def add_lag_feature(frame, value_col, lag_ms, output_col):
 # ============================================================
 
 print("=" * 75)
-print(" Temporal GNSS C/N0 Prediction")
+print(" Temporal GNSS C/N0 Prediction (t+1s)")
 print("=" * 75)
 
-print(f"\nLoading:\n{DATA_PATH}")
+ensure_dirs()
 
-if not DATA_PATH.exists():
+print(f"\nLoading:\n{MERGED_CORPUS}")
+
+if not MERGED_CORPUS.exists():
     raise FileNotFoundError(
-        f"Data file not found at {DATA_PATH}. "
-        "Set NAVIC_DATA_PATH to override the default location."
+        f"Data file not found at {MERGED_CORPUS}. "
+        "Set ISRO_MERGED_CORPUS to override the default location."
     )
 
-df = pd.read_parquet(DATA_PATH)
+df = pd.read_parquet(MERGED_CORPUS)
 
 print(f"\nLoaded rows: {len(df):,}")
 print(f"Sessions: {df['session_id'].nunique()}")
@@ -591,7 +584,7 @@ ridge_coefficients = pd.DataFrame(
 )
 ridge_coefficients["abs_coefficient"] = ridge_coefficients["coefficient"].abs()
 ridge_coefficients = ridge_coefficients.sort_values("abs_coefficient", ascending=False)
-ridge_coefficients.to_csv(ARTIFACT_DIR / "ridge_coefficients.csv", index=False)
+ridge_coefficients.to_csv(TEMPORAL_ARTIFACTS / "ridge_coefficients.csv", index=False)
 
 print("\nTop Ridge features:")
 print(ridge_coefficients.head(20).to_string(index=False))
@@ -607,7 +600,7 @@ rf_importance_df = pd.DataFrame(
     }
 )
 rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
-rf_importance_df.to_csv(ARTIFACT_DIR / "rf_importance.csv", index=False)
+rf_importance_df.to_csv(TEMPORAL_ARTIFACTS / "rf_importance.csv", index=False)
 
 print("\nTop Random Forest features:")
 print(rf_importance_df.head(20).to_string(index=False))
@@ -617,14 +610,14 @@ print(rf_importance_df.head(20).to_string(index=False))
 # SAVE MODELS
 # ============================================================
 
-joblib.dump(ridge_model, ARTIFACT_DIR / "ridge_temporal_1s.joblib")
-joblib.dump(rf_model, ARTIFACT_DIR / "rf_temporal_1s.joblib")
+joblib.dump(ridge_model, TEMPORAL_ARTIFACTS / "ridge_temporal_1s.joblib")
+joblib.dump(rf_model, TEMPORAL_ARTIFACTS / "rf_temporal_1s.joblib")
 
-with open(ARTIFACT_DIR / "feature_cols.json", "w") as f:
+with open(TEMPORAL_ARTIFACTS / "feature_cols.json", "w") as f:
     json.dump(feature_cols, f, indent=2)
 
-ridge_scores_df.to_csv(ARTIFACT_DIR / "ridge_cv.csv", index=False)
-rf_scores_df.to_csv(ARTIFACT_DIR / "rf_cv.csv", index=False)
+ridge_scores_df.to_csv(TEMPORAL_ARTIFACTS / "ridge_cv.csv", index=False)
+rf_scores_df.to_csv(TEMPORAL_ARTIFACTS / "rf_cv.csv", index=False)
 
 
 # ============================================================
@@ -752,7 +745,7 @@ if len(selection_df) > 0:
             f"Median C/N0 regret: {selection_df[name + '_regret'].median():.3f} dB-Hz"
         )
 
-    selection_df.to_parquet(ARTIFACT_DIR / "selection_results.parquet", index=False)
+    selection_df.to_parquet(TEMPORAL_ARTIFACTS / "selection_results.parquet", index=False)
 
     selection_summary = pd.DataFrame(
         [
@@ -766,7 +759,7 @@ if len(selection_df) > 0:
             for name in ["persistence", "ridge", "rf"]
         ]
     )
-    selection_summary.to_csv(ARTIFACT_DIR / "selection_summary.csv", index=False)
+    selection_summary.to_csv(TEMPORAL_ARTIFACTS / "selection_summary.csv", index=False)
 
     print("\nSelection summary:")
     print(selection_summary.to_string(index=False))
@@ -782,4 +775,4 @@ else:
 print("\n" + "=" * 75)
 print(" COMPLETE")
 print("=" * 75)
-print(f"\nArtifacts saved to:\n{ARTIFACT_DIR}")
+print(f"\nArtifacts saved to:\n{TEMPORAL_ARTIFACTS}")

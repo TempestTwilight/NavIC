@@ -12,22 +12,27 @@ import logging
 import sys
 import duckdb
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from .config import (
+    MERGED_CORPUS,
+    CATEGORIZED_DIR,
+    GNSS_PARQUET_DIR,
+    MERGED_OUTPUT_DIR,
+    MAX_ORIENTATION_DT_MS,
+    DUCKDB_MEMORY_LIMIT,
+    ensure_dirs,
+)
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_DIR = PROJECT_ROOT / "results" / "merged_data"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR = MERGED_OUTPUT_DIR
 OUTPUT_FILE = OUTPUT_DIR / "combined_corpus.parquet"
 TEMP_FILE = OUTPUT_DIR / "combined_corpus.tmp.parquet"
 
-GNSS_PARQUET_DIR = PROJECT_ROOT / "gnss-eda" / "data" / "parquet"
 STATUS_PQ = GNSS_PARQUET_DIR / "Status.parquet"
 ORIENT_PQ = GNSS_PARQUET_DIR / "OrientationDeg.parquet"
-
-CATEGORIZED_DIR = PROJECT_ROOT / "data" / "Categorized_Data"
-
-MAX_ORIENTATION_DT_MS = 500  # Maximum timestamp difference tolerance
 
 
 def sql_escape(path: Path) -> str:
@@ -38,11 +43,11 @@ def sql_escape(path: Path) -> str:
 def merge_parquet_sources(con: duckdb.DuckDBPyConnection):
     """Merge Parquet sources with session reconstruction and isolation."""
     log.info(f"Processing Parquet: {GNSS_PARQUET_DIR}")
-    
+
     status_path = sql_escape(STATUS_PQ)
     orient_path = sql_escape(ORIENT_PQ)
     temp_path = sql_escape(TEMP_FILE)
-    
+
     # Deduplicate orientation by (utcTimeMillis, elapsedRealtimeNanos) - keep last
     query = f"""
     COPY (
@@ -107,11 +112,11 @@ def merge_parquet_sources(con: duckdb.DuckDBPyConnection):
 def merge_csv_sources(con: duckdb.DuckDBPyConnection):
     """Merge CSV sources with explicit schema and session isolation."""
     log.info(f"Processing CSV: {CATEGORIZED_DIR}")
-    
+
     status_glob = sql_escape(CATEGORIZED_DIR / "*" / "Status.csv")
     orient_glob = sql_escape(CATEGORIZED_DIR / "*" / "OrientationDeg.csv")
     temp_path = sql_escape(TEMP_FILE)
-    
+
     query = f"""
     COPY (
         WITH status_raw AS (
@@ -189,7 +194,7 @@ def merge_csv_sources(con: duckdb.DuckDBPyConnection):
 def validate_output(con: duckdb.DuckDBPyConnection):
     """Validate merged output."""
     temp_path = sql_escape(TEMP_FILE)
-    
+
     stats = con.execute(f"""
         SELECT 
             COUNT(*) as total_rows,
@@ -204,17 +209,19 @@ def validate_output(con: duckdb.DuckDBPyConnection):
             COUNT(CASE WHEN yawDeg IS NULL THEN 1 END) as missing_yaw
         FROM read_parquet('{temp_path}')
     """).fetchone()
-    
+
     if stats is None:
         log.error("Failed to query output statistics")
         return False
-    
+
     log.info("Output validation:")
     log.info(f"  Total rows: {stats[0]:,}")
     log.info(f"  Sessions: {stats[1]}")
     log.info(f"  Devices: {stats[2]}")
-    log.info(f"  Orientation dt (ms): min={stats[3]}, max={stats[4]}, avg={stats[5]:.2f}")
-    
+    log.info(
+        f"  Orientation dt (ms): min={stats[3]}, max={stats[4]}, avg={stats[5]:.2f}"
+    )
+
     if stats[6] > 0:
         log.error(f"  ERROR: {stats[6]} records with negative orientation_dt_ms")
         return False
@@ -225,17 +232,39 @@ def validate_output(con: duckdb.DuckDBPyConnection):
         log.warning(f"  WARNING: {stats[8]} records with invalid Cn0DbHz")
     if stats[9] > 0:
         log.warning(f"  WARNING: {stats[9]} records missing orientation")
-    
+
     # Schema validation
     expected_cols = {
-        'UnixTimeMillis', 'SignalCount', 'SignalIndex', 'ConstellationType', 'Svid',
-        'CarrierFrequencyHz', 'Cn0DbHz', 'AzimuthDegrees', 'ElevationDegrees',
-        'UsedInFix', 'HasAlmanacData', 'HasEphemerisData', 'BasebandCn0DbHz',
-        'utcTimeMillis', 'elapsedRealtimeNanos', 'yawDeg', 'rollDeg', 'pitchDeg',
-        'CalibrationAccuracy', 'orientation_dt_ms', 'session_id', 'device_id', 'signal_id'
+        "UnixTimeMillis",
+        "SignalCount",
+        "SignalIndex",
+        "ConstellationType",
+        "Svid",
+        "CarrierFrequencyHz",
+        "Cn0DbHz",
+        "AzimuthDegrees",
+        "ElevationDegrees",
+        "UsedInFix",
+        "HasAlmanacData",
+        "HasEphemerisData",
+        "BasebandCn0DbHz",
+        "utcTimeMillis",
+        "elapsedRealtimeNanos",
+        "yawDeg",
+        "rollDeg",
+        "pitchDeg",
+        "CalibrationAccuracy",
+        "orientation_dt_ms",
+        "session_id",
+        "device_id",
+        "signal_id",
     }
-    actual_cols = set(con.execute(f"DESCRIBE SELECT * FROM read_parquet('{temp_path}')").df()['column_name'])
-    
+    actual_cols = set(
+        con.execute(f"DESCRIBE SELECT * FROM read_parquet('{temp_path}')").df()[
+            "column_name"
+        ]
+    )
+
     if expected_cols != actual_cols:
         missing = expected_cols - actual_cols
         extra = actual_cols - expected_cols
@@ -244,21 +273,22 @@ def validate_output(con: duckdb.DuckDBPyConnection):
         if extra:
             log.warning(f"  WARNING: Extra columns: {extra}")
         return False
-    
+
     log.info("  Schema validation: PASS")
     return True
 
 
 def main():
+    ensure_dirs()
     log.info("=" * 70)
     log.info(" GNSS + Orientation Merge (DuckDB)")
     log.info("=" * 70)
-    
+
     con = duckdb.connect()
-    con.execute("SET memory_limit = '2GB';")
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}';")
     con.execute("SET temp_directory = '/tmp/duckdb_temp';")
     con.execute("SET preserve_insertion_order = false;")
-    
+
     try:
         # Determine source and merge
         if STATUS_PQ.exists() and ORIENT_PQ.exists():
@@ -267,25 +297,26 @@ def main():
             merge_csv_sources(con)
         else:
             log.error("No valid data sources found")
-            log.error(f"  Checked: {GNSS_PARQUET_DIR}")
+            log.error(f"  Checked: {STATUS_PQ}")
+            log.error(f"  Checked: {ORIENT_PQ}")
             log.error(f"  Checked: {CATEGORIZED_DIR}")
             sys.exit(1)
-        
+
         # Validate
         if not validate_output(con):
             log.error("Validation failed - output not saved")
             TEMP_FILE.unlink(missing_ok=True)
             sys.exit(1)
-        
+
         # Atomic replace
         if OUTPUT_FILE.exists():
             backup = OUTPUT_DIR / "combined_corpus.backup.parquet"
             OUTPUT_FILE.rename(backup)
             log.info(f"Backed up existing output to {backup.name}")
-        
+
         TEMP_FILE.rename(OUTPUT_FILE)
         log.info(f"✓ Success: {OUTPUT_FILE}")
-        
+
     except Exception as e:
         log.error(f"Merge failed: {e}", exc_info=True)
         TEMP_FILE.unlink(missing_ok=True)
