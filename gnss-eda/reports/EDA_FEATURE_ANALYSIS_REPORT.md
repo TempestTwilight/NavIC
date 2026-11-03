@@ -1,9 +1,12 @@
 # GNSS Feature Analysis & Exploratory Data Analysis Report
-**Project:** ISRO GNSS Orientation & Temporal Optimization Pipeline  
-**Dataset Path:** `/home/tempest/Documents/ISRO_Project/gnss-eda/data/parquet/`  
-**Analysis Engine:** DuckDB (Zero-RAM streaming execution, < 2GB RAM budget)  
-**Reference Document:** `/home/tempest/Documents/ISRO_Project_physics_features/PHYSICS_FEATURES_SUMMARY.md`  
-**Date:** September 2026  
+
+| Field | Details |
+|---|---|
+| **Project** | ISRO GNSS Orientation & Temporal Optimization Pipeline |
+| **Dataset Path** | `/home/tempest/Documents/ISRO_Project/gnss-eda/data/parquet/` |
+| **Analysis Engine** | DuckDB — zero-RAM streaming execution, under 2 GB RAM budget |
+| **Reference Document** | `/home/tempest/Documents/ISRO_Project_physics_features/PHYSICS_FEATURES_SUMMARY.md` |
+| **Report Date** | September 2026 |
 
 ---
 
@@ -21,6 +24,62 @@ The end-to-end operational loop consists of two distinct machine learning models
 2. **Adoption of 3D Vector Incidence Physics:** Replaced body angles with the 3D spatial dot product between the satellite Line-of-Sight (LOS) unit vector $\mathbf{s}_{\text{enu}}$ and the antenna normal boresight unit vector $\mathbf{n}_{\text{enu}}$. Empirical DuckDB analysis proves that moving from negative incidence (chassis-shielded) to $\cos\theta_{\text{inc}} \approx 1.0$ (boresight alignment) delivers an average $+2.5\,\text{dB-Hz}$ gain in $C/N_0$.
 3. **Temporal Dynamics Verified:** Autocorrelation of $C/N_0$ remains remarkably high over short intervals ($r = 0.968$ at $5\text{s}$, $r = 0.957$ at $10\text{s}$, $r = 0.931$ at $30\text{s}$). Transitions at $1\text{s}$ and $30\text{s}$ exhibit $\approx 20\%$ degradation, $\approx 60\%$ stability, and $\approx 20\%$ improvement, confirming that signal trend detection via autoregressive lags and velocity derivatives ($\frac{dC/N_0}{dt}$, $\frac{d\text{Elev}}{dt}$) provides high predictive power.
 4. **Target Leakage Prohibition in Orientation Model:** Current $C/N_0$ **must never** be passed as an input feature to `02_orientation_model.py`. At inference time, the model evaluates candidate orientations that the user has not rotated to yet; passing current $C/N_0$ would leak the present physical orientation and blind the model to alternative orientations.
+
+### State and Accumulated Delta Range
+
+This section documents two additional Android GNSS measurement fields and their potential use in the temporal and orientation models.
+
+#### 1. State (integer bitmask)
+
+**What it is:** GNSS measurement tracking-state flags for each satellite (`Android GnssMeasurement.State`).
+
+**Why it is present:** The raw GNSS log comes from the phone's `GnssMeasurement` API. Every measurement row carries its tracking status.
+
+**Bit definitions**
+
+| Bit | Hex value | Flag | Meaning |
+|---:|---:|---|---|
+| 0 | `0x1` | `STATE_HAS_CARRIER_FREQUENCY` | Carrier frequency is known |
+| 1 | `0x2` | `STATE_HAS_CARRIER_PHASE` | Carrier-phase measurement is valid |
+| 2 | `0x4` | `STATE_HAS_CARRIER_CYCLES` | Carrier cycles (integer ambiguity) are valid |
+| 3 | `0x8` | `STATE_HAS_SNR` | SNR / C/N0 measurement is valid |
+| 4 | `0x16` | `STATE_HAS_MULTIPATH_INDICATOR` | Multipath flag is present |
+| 5 | `0x32` | `STATE_HAS_PSEUDORANGE_RATE` | Doppler / pseudorange rate is valid |
+| 6 | `0x64` | `STATE_HAS_ACCUMULATED_DELTA_RANGE` | ADR is valid |
+| 7 | `0x128` | `STATE_HAS_ALTITUDE` | Satellite elevation has been computed |
+| 8 | `0x256` | `STATE_HAS_SPEED` | Satellite velocity has been computed |
+| 9 | `0x512` | `STATE_HAS_ACCURACY` | Accuracy estimate is present |
+| 10 | `0x1000` | `STATE_FULL_TRACKING` | Full carrier-phase lock has been achieved |
+
+Use this field to filter measurements or diagnose tracking dropouts. For example, the original notes suggest checking `State & 0x128 != 0` for full tracking.
+
+**Suggested model usage**
+
+| Model | Use case | How |
+|---|---|---|
+| **Temporal** | Track quality dynamics | Extract bits as Boolean flags (for example, `has_full_tracking = State & 0x1000 != 0`). Add lag and delta features such as `full_tracking_lag_1s` and `full_tracking_delta_5s`. Carrier-phase lock loss or gain may predict C/N0 jumps. |
+| **Orientation** | Weight or filter by quality | Use `has_full_tracking` as a sample weight or filter. Full-tracking measurements have lower multipath and a different C/N0 distribution. A binary `state_full_tracking` feature could also be added. |
+
+#### 2. `AccumulatedDeltaRangeMeters` (double)
+
+**What it is:** Accumulated Delta Range (ADR) — an integrated carrier-phase measurement, in meters, accumulated since tracking started. It is equivalent to:
+
+`carrier_cycles × wavelength + initial_ambiguity`
+
+**Why it is present:** It is a raw carrier-phase observable exposed by the chipset through Android's `getAccumulatedDeltaRangeMeters()`.
+
+**Additional information**
+
+- Carrier-phase precision is approximately millimetre-level, compared with metre-level pseudorange precision. This enables RTK/PPP, cycle-slip detection, and precise relative positioning.
+- `AccumulatedDeltaRangeState` indicates whether ADR is valid (the `STATE_HAS_ACCUMULATED_DELTA_RANGE` bit is set) or has been reset (for example, after a cycle slip or loss of lock).
+- `AccumulatedDeltaRangeUncertaintyMeters` provides the chipset's estimated error, including thermal noise and dynamic stress.
+
+**Suggested model usage**
+
+| Model | Use case | How |
+|---|---|---|
+| **Temporal** | High-value, millimetre-level precision | Compute `adr_delta_1s = ADR - ADR_lag_1s` as a carrier-phase rate (described in the source notes as superior Doppler). Add `adr_delta_1s`, `adr_delta_5s`, and `adr_slope_5s`. Detect cycle slips through the `AccumulatedDeltaRangeState` reset flag and a `cycle_slip_flag` feature. |
+| **Orientation** | Limited direct value | ADR measures phase, not power. Indirectly, cycle slips may correlate with multipath. Add `adr_uncertainty` or `cycle_slip_flag` as a proxy for multipath contamination affecting C/N0. |
 
 ---
 
