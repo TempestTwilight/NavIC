@@ -292,53 +292,43 @@ class OptimizerPipeline(
         val elDelta5s = obs.elevationDegrees - lag5s.elevationDegrees
         val azDelta1s = FeatureEngineering.circularDeltaDeg(obs.azimuthDegrees, lag1s.azimuthDegrees)
 
-        // Populate array in exact order of ModelArtifacts.TEMPORAL_FEATURES (46 features)
+        // Populate array in exact order of ModelArtifacts.TEMPORAL_FEATURES (36 features)
         out[0] = elSin
-        out[1] = elCos
-        out[2] = relAzSin
-        out[3] = relAzCos
-        out[4] = airmass
-        out[5] = airmassKy
-        out[6] = isAboveHorizon
-        out[7] = freqGhz
-        out[8] = freqLossDb
-        out[9] = pitchSin
-        out[10] = pitchCos
-        out[11] = rollSin
-        out[12] = rollCos
-        out[13] = isGps
-        out[14] = isSbas
-        out[15] = isGlonass
-        out[16] = isGalileo
-        out[17] = isBeidou
-        out[18] = isQzss
-        out[19] = isNavic
-        out[20] = relAzXEl
-        out[21] = navicXAirmass
-        out[22] = gpsXAirmass
-        out[23] = galileoXAirmass
-        out[24] = freqLossXElev
-        out[25] = obs.signalCount.toDouble()
-        out[26] = if (obs.usedInFix) 1.0 else 0.0
-        out[27] = if (obs.hasAlmanac) 1.0 else 0.0
-        out[28] = if (obs.hasEphemeris) 1.0 else 0.0
-        out[29] = obs.cn0DbHz
-        out[30] = obs.basebandCn0DbHz
-        out[31] = lag1s.cn0DbHz
-        out[32] = lag2s.cn0DbHz
-        out[33] = lag5s.cn0DbHz
-        out[34] = lag10s.cn0DbHz
-        out[35] = cn0Delta1s
-        out[36] = cn0Delta2s
-        out[37] = cn0Delta5s
-        out[38] = cn0Slope1s
-        out[39] = cn0Slope5s
-        out[40] = lag1s.elevationDegrees
-        out[41] = lag5s.elevationDegrees
-        out[42] = lag1s.azimuthDegrees
-        out[43] = elDelta1s
-        out[44] = elDelta5s
-        out[45] = azDelta1s
+        out[1] = relAzSin
+        out[2] = relAzCos
+        out[3] = airmassKy
+        out[4] = isAboveHorizon
+        out[5] = freqLossDb
+        out[6] = pitchSin
+        out[7] = pitchCos
+        out[8] = rollSin
+        out[9] = rollCos
+        out[10] = isGps
+        out[11] = isSbas
+        out[12] = isGlonass
+        out[13] = isGalileo
+        out[14] = isBeidou
+        out[15] = isQzss
+        out[16] = isNavic
+        out[17] = relAzXEl
+        out[18] = freqLossXElev
+        out[19] = obs.cn0DbHz
+        out[20] = obs.basebandCn0DbHz
+        out[21] = lag1s.cn0DbHz
+        out[22] = lag2s.cn0DbHz
+        out[23] = lag5s.cn0DbHz
+        out[24] = lag10s.cn0DbHz
+        out[25] = cn0Delta1s
+        out[26] = cn0Delta2s
+        out[27] = cn0Delta5s
+        out[28] = cn0Slope1s
+        out[29] = cn0Slope5s
+        out[30] = lag1s.elevationDegrees
+        out[31] = lag5s.elevationDegrees
+        out[32] = lag1s.azimuthDegrees
+        out[33] = elDelta1s
+        out[34] = elDelta5s
+        out[35] = azDelta1s
 
         return true
     }
@@ -391,30 +381,23 @@ class OptimizerPipeline(
         val galileoXAirmass = isGalileo * airmassKy
         val freqLossXElev = freqLossDb * elSin
 
-        // Order matching ModelArtifacts.ORIENTATION_FEATURES (24 features)
+        // Order matching ModelArtifacts.ORIENTATION_FEATURES (17 features)
         out[0] = cosInc
-        out[1] = incDeg
-        out[2] = elSin
-        out[3] = elCos
-        out[4] = isAboveHorizon
-        out[5] = relAzSin
-        out[6] = relAzCos
-        out[7] = airmassSimple
-        out[8] = airmassKy
-        out[9] = freqGhz
-        out[10] = freqLossDb
-        out[11] = isGps
-        out[12] = isSbas
-        out[13] = isGlonass
-        out[14] = isQzss
-        out[15] = isBeidou
-        out[16] = isGalileo
-        out[17] = isNavic
-        out[18] = relAzXEl
-        out[19] = cosIncXAirmass
-        out[20] = navicXAirmass
-        out[21] = gpsXAirmass
-        out[22] = galileoXAirmass
-        out[23] = freqLossXElev
+        out[1] = elSin
+        out[2] = isAboveHorizon
+        out[3] = relAzSin
+        out[4] = relAzCos
+        out[5] = airmassKy
+        out[6] = freqLossDb
+        out[7] = isGps
+        out[8] = isSbas
+        out[9] = isGlonass
+        out[10] = isQzss
+        out[11] = isBeidou
+        out[12] = isGalileo
+        out[13] = isNavic
+        out[14] = relAzXEl
+        out[15] = cosIncXAirmass
+        out[16] = freqLossXElev
     }
 }

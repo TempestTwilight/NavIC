@@ -11,13 +11,10 @@ object ModelArtifacts {
     // ==========================================
     val TEMPORAL_FEATURES: Array<String> = arrayOf(
         "elevation_sin",
-        "elevation_cos",
         "rel_az_sin",
         "rel_az_cos",
-        "airmass",
         "airmass_ky",
         "is_above_horizon",
-        "freq_ghz",
         "freq_loss_db",
         "pitch_sin",
         "pitch_cos",
@@ -31,14 +28,7 @@ object ModelArtifacts {
         "is_qzss",
         "is_navic",
         "rel_az_x_el",
-        "navic_x_airmass",
-        "gps_x_airmass",
-        "galileo_x_airmass",
         "freq_loss_x_elev",
-        "SignalCount",
-        "UsedInFix",
-        "HasAlmanacData",
-        "HasEphemerisData",
         "Cn0DbHz",
         "BasebandCn0DbHz",
         "cn0_lag_1s",
@@ -212,15 +202,11 @@ object ModelArtifacts {
     // ==========================================
     val ORIENTATION_FEATURES: Array<String> = arrayOf(
         "cos_inc",
-        "inc_deg",
         "elevation_sin",
-        "elevation_cos",
         "is_above_horizon",
         "rel_az_sin",
         "rel_az_cos",
-        "airmass_simple",
         "airmass_ky",
-        "freq_ghz",
         "freq_loss_db",
         "is_gps",
         "is_sbas",
@@ -231,9 +217,6 @@ object ModelArtifacts {
         "is_navic",
         "rel_az_x_el",
         "cos_inc_x_airmass",
-        "navic_x_airmass",
-        "gps_x_airmass",
-        "galileo_x_airmass",
         "freq_loss_x_elev"
     )
 

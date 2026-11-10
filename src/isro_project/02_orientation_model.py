@@ -159,14 +159,12 @@ def add_features(df, assume_flat_tilt=True):
     df["cos_inc"] = np.clip(
         s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0
     )
-    df["inc_deg"] = np.degrees(np.arccos(df["cos_inc"]))
 
     # --------------------------------------------------------
     # Elevation features
     # --------------------------------------------------------
 
     df["elevation_sin"] = np.sin(el)
-    df["elevation_cos"] = np.cos(el)
     df["is_above_horizon"] = (df["ElevationDegrees"] > 0).astype(float)
 
     # --------------------------------------------------------
@@ -181,22 +179,18 @@ def add_features(df, assume_flat_tilt=True):
     # Tropospheric Airmass (Kasten-Young model)
     # --------------------------------------------------------
 
-    elevation_clipped = np.clip(df["ElevationDegrees"].values, 1.0, 89.0)
-    df["airmass_simple"] = 1.0 / np.sin(np.deg2rad(elevation_clipped))
     df["airmass_ky"] = 1.0 / (
         np.sin(el) + 0.15 * (df["ElevationDegrees"].values + 3.885) ** (-1.25)
     )
 
     # --------------------------------------------------------
-    # Frequency features
+    # Frequency features (Friis loss relative to L1)
     # --------------------------------------------------------
 
-    df["freq_ghz"] = df["CarrierFrequencyHz"] / 1e9
-    # Relative path loss in dB (relative to L1 1575.42 MHz)
     df["freq_loss_db"] = 20.0 * np.log10(df["CarrierFrequencyHz"].values / 1575420000.0)
 
     # --------------------------------------------------------
-    # Constellation one-hot features (FIXED: use numeric IDs)
+    # Constellation one-hot features (numeric IDs)
     # --------------------------------------------------------
 
     df["is_gps"] = (df["ConstellationType"] == 1).astype(float)
@@ -213,9 +207,6 @@ def add_features(df, assume_flat_tilt=True):
 
     df["rel_az_x_el"] = df["rel_az_cos"] * df["elevation_sin"]
     df["cos_inc_x_airmass"] = df["cos_inc"] * df["airmass_ky"]
-    df["navic_x_airmass"] = df["is_navic"] * df["airmass_ky"]
-    df["gps_x_airmass"] = df["is_gps"] * df["airmass_ky"]
-    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass_ky"]
     df["freq_loss_x_elev"] = df["freq_loss_db"] * df["elevation_sin"]
 
     return df
@@ -286,18 +277,14 @@ df = add_features(df)
 feature_cols = [
     # Core physics-based geometry
     "cos_inc",
-    "inc_deg",
     "elevation_sin",
-    "elevation_cos",
     "is_above_horizon",
     # Relative azimuth
     "rel_az_sin",
     "rel_az_cos",
     # Atmospheric path
-    "airmass_simple",
     "airmass_ky",
     # Signal parameters
-    "freq_ghz",
     "freq_loss_db",
     # Constellation indicators
     "is_gps",
@@ -310,9 +297,6 @@ feature_cols = [
     # Interaction terms
     "rel_az_x_el",
     "cos_inc_x_airmass",
-    "navic_x_airmass",
-    "gps_x_airmass",
-    "galileo_x_airmass",
     "freq_loss_x_elev",
 ]
 
@@ -321,7 +305,11 @@ feature_cols = [
 # VALID EXAMPLES
 # ============================================================
 
-target_col = "Cn0DbHz"
+# Epoch-relative centering: remove cross-device hardware gain offset
+# Cn0_relative = Cn0 - mean(Cn0) over all visible satellites in that epoch
+epoch_mean = df.groupby(["session_id", "UnixTimeMillis"])["Cn0DbHz"].transform("mean")
+df["target_relative_cn0"] = df["Cn0DbHz"] - epoch_mean
+target_col = "target_relative_cn0"
 
 df = df.dropna(subset=feature_cols + [target_col]).copy()
 

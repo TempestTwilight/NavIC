@@ -58,8 +58,8 @@ BASELINE_ARTIFACTS = MODEL_DIR / "baseline_artifacts"
 # TRAINING CONFIG
 # ============================================================
 RANDOM_STATE = int(os.environ.get("ISRO_RANDOM_STATE", "42"))
-HORIZON_MS = int(os.environ.get("ISRO_HORIZON_MS", "1000"))
-TARGET_TOLERANCE_MS = int(os.environ.get("ISRO_TARGET_TOLERANCE_MS", "150"))
+HORIZON_MS = int(os.environ.get("ISRO_HORIZON_MS", "15000"))
+TARGET_TOLERANCE_MS = int(os.environ.get("ISRO_TARGET_TOLERANCE_MS", "1000"))
 
 MAX_ORIENTATION_DT_MS = int(os.environ.get("ISRO_MAX_ORIENTATION_DT_MS", "500"))
 

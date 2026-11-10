@@ -118,9 +118,6 @@ def add_static_features(df):
     df["is_navic"] = (ctype == 7).astype(float)
 
     df["rel_az_x_el"] = df["rel_az_cos"] * df["elevation_sin"]
-    df["navic_x_airmass"] = df["is_navic"] * df["airmass_ky"]
-    df["gps_x_airmass"] = df["is_gps"] * df["airmass_ky"]
-    df["galileo_x_airmass"] = df["is_galileo"] * df["airmass_ky"]
     df["freq_loss_x_elev"] = df["freq_loss_db"] * df["elevation_sin"]
 
     if "tilt_angle" in df.columns:
@@ -162,7 +159,7 @@ def add_lag_feature(frame, value_col, lag_ms, output_col):
         left_on="query_time",
         right_on="history_time",
         by=SIGNAL_KEYS,
-        direction="nearest",
+        direction="backward",
         tolerance=TARGET_TOLERANCE_MS,
     )
 
@@ -310,7 +307,7 @@ target_left = target_left.sort_values(["target_time"] + SIGNAL_KEYS)
 
 target_right = df[SIGNAL_KEYS + ["UnixTimeMillis", "Cn0DbHz"]].copy()
 target_right = target_right.rename(
-    columns={"UnixTimeMillis": "future_time", "Cn0DbHz": "target_cn0"}
+    columns={"UnixTimeMillis": "future_time", "Cn0DbHz": "target_cn0_raw"}
 )
 target_right = target_right.sort_values(["future_time"] + SIGNAL_KEYS)
 
@@ -324,9 +321,12 @@ future = pd.merge_asof(
     tolerance=TARGET_TOLERANCE_MS,
 )
 
-target_result = pd.Series(index=df.index, dtype=float)
-target_result.loc[future["_orig_index"].values] = future["target_cn0"].values
-df["target_cn0"] = target_result
+target_raw = pd.Series(index=df.index, dtype=float)
+target_raw.loc[future["_orig_index"].values] = future["target_cn0_raw"].values
+
+# Residual target: delta Cn0 = future_cn0 - current_cn0
+df["target_delta_cn0"] = target_raw - df["Cn0DbHz"]
+df["target_cn0"] = df["target_delta_cn0"]
 
 
 # ============================================================
@@ -347,13 +347,10 @@ print("\n--- Building model features ---")
 
 feature_cols = [
     "elevation_sin",
-    "elevation_cos",
     "rel_az_sin",
     "rel_az_cos",
-    "airmass",
     "airmass_ky",
     "is_above_horizon",
-    "freq_ghz",
     "freq_loss_db",
     "pitch_sin",
     "pitch_cos",
@@ -367,14 +364,7 @@ feature_cols = [
     "is_qzss",
     "is_navic",
     "rel_az_x_el",
-    "navic_x_airmass",
-    "gps_x_airmass",
-    "galileo_x_airmass",
     "freq_loss_x_elev",
-    "SignalCount",
-    "UsedInFix",
-    "HasAlmanacData",
-    "HasEphemerisData",
     "Cn0DbHz",
     "BasebandCn0DbHz",
     "cn0_lag_1s",
