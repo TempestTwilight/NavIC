@@ -162,9 +162,7 @@ def load_session_sky(session_name: str) -> pd.DataFrame:
         session_path = Path("/kaggle/input") / "categorized-data" / session_name
 
     if not session_path.exists():
-        raise FileNotFoundError(
-            f"Session '{session_name}' not found under {DATA_DIR}."
-        )
+        raise FileNotFoundError(f"Session '{session_name}' not found under {DATA_DIR}.")
 
     return load_sky_from_folder(session_path)
 
@@ -312,10 +310,19 @@ def main():
     parser = argparse.ArgumentParser(
         description="Predict best phone orientation for GNSS signal quality"
     )
-    parser.add_argument("--session", type=str, help="Session folder name under data/test/")
-    parser.add_argument("--csv", type=str, help="Path to session folder (alias for --session)")
+    parser.add_argument(
+        "--session", type=str, help="Session folder name under data/test/"
+    )
+    parser.add_argument(
+        "--csv", type=str, help="Path to session folder (alias for --session)"
+    )
     parser.add_argument("--model", type=str, choices=["ridge", "rf"], default="ridge")
-    parser.add_argument("--angles", type=str, default="0,45,90,135", help="Comma-separated candidate yaw angles")
+    parser.add_argument(
+        "--angles",
+        type=str,
+        default="0,45,90,135",
+        help="Comma-separated candidate yaw angles",
+    )
     args = parser.parse_args()
 
     global CANDIDATE_ANGLES
@@ -348,7 +355,9 @@ def main():
     print("\nAll candidates (sorted by predicted total C/N0):")
     for r in result["all_candidates"]:
         marker = " ← BEST" if r["angle"] == result["best_yaw"] else ""
-        print(f"  {r['angle']:>3}°: total={r['total_cn0']:.1f}, mean={r['mean_cn0']:.2f}, sats={r['n_sats']}{marker}")
+        print(
+            f"  {r['angle']:>3}°: total={r['total_cn0']:.1f}, mean={r['mean_cn0']:.2f}, sats={r['n_sats']}{marker}"
+        )
 
 
 if __name__ == "__main__":

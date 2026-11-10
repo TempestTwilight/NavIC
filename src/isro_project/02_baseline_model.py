@@ -29,7 +29,6 @@ Important:
     It is NOT used as an ML feature.
 """
 
-from pathlib import Path
 import json
 import warnings
 
@@ -53,7 +52,6 @@ from .config import (
     BASELINE_ARTIFACTS,
     RANDOM_STATE,
     HORIZON_MS,
-    TARGET_TOLERANCE_MS,
     ensure_dirs,
 )
 
@@ -1291,7 +1289,9 @@ pd.DataFrame(cv_rows).to_csv(BASELINE_ARTIFACTS / "cv_results.csv", index=False)
 # ---------------------------------------------------------------------
 
 if len(selection_df) > 0:
-    selection_df.to_parquet(BASELINE_ARTIFACTS / "selection_results.parquet", index=False)
+    selection_df.to_parquet(
+        BASELINE_ARTIFACTS / "selection_results.parquet", index=False
+    )
 
 
 # =====================================================================

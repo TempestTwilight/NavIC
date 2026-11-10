@@ -4,13 +4,16 @@
   "rel_az_sin",
   "rel_az_cos",
   "airmass",
+  "airmass_ky",
   "is_above_horizon",
   "freq_ghz",
+  "freq_loss_db",
   "pitch_sin",
   "pitch_cos",
   "roll_sin",
   "roll_cos",
   "is_gps",
+  "is_sbas",
   "is_glonass",
   "is_galileo",
   "is_beidou",
@@ -20,6 +23,7 @@
   "navic_x_airmass",
   "gps_x_airmass",
   "galileo_x_airmass",
+  "freq_loss_x_elev",
   "SignalCount",
   "UsedInFix",
   "HasAlmanacData",
@@ -40,7 +44,5 @@
   "azimuth_lag_1s",
   "elevation_delta_1s",
   "elevation_delta_5s",
-  "azimuth_delta_1s",
-  "tilt_angle_sin",
-  "tilt_angle_cos"
+  "azimuth_delta_1s"
 ]

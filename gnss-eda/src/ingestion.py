@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from src.config import RAW_DIR, PARQUET_DIR
+from src.config import PARQUET_DIR, RAW_DIR
 from src.database import get_connection
 
 

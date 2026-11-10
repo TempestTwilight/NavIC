@@ -1,11 +1,9 @@
-from pathlib import Path
 import json
 import warnings
 
 import joblib
 import numpy as np
 import pandas as pd
-
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -14,11 +12,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .config import (
-    MERGED_CORPUS,
-    TEMPORAL_ARTIFACTS,
-    RANDOM_STATE,
     HORIZON_MS,
+    MERGED_CORPUS,
+    RANDOM_STATE,
     TARGET_TOLERANCE_MS,
+    TEMPORAL_ARTIFACTS,
     ensure_dirs,
 )
 
@@ -745,7 +743,9 @@ if len(selection_df) > 0:
             f"Median C/N0 regret: {selection_df[name + '_regret'].median():.3f} dB-Hz"
         )
 
-    selection_df.to_parquet(TEMPORAL_ARTIFACTS / "selection_results.parquet", index=False)
+    selection_df.to_parquet(
+        TEMPORAL_ARTIFACTS / "selection_results.parquet", index=False
+    )
 
     selection_summary = pd.DataFrame(
         [

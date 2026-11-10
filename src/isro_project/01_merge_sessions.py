@@ -13,7 +13,6 @@ import sys
 import duckdb
 
 from .config import (
-    MERGED_CORPUS,
     CATEGORIZED_DIR,
     GNSS_PARQUET_DIR,
     MERGED_OUTPUT_DIR,
