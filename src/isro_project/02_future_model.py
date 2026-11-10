@@ -406,12 +406,18 @@ y = complete["target_cn0"].astype(float)
 # GROUPS
 # ============================================================
 
+# Calendar day grouping (prevents sky geometry leakage from same-day sessions)
+complete["recording_day"] = pd.to_datetime(complete["UnixTimeMillis"], unit="ms").dt.date.astype(str)
+
 if (
     complete["device_id"].nunique() > 1
     and not complete["device_id"].astype(str).eq("unknown").all()
 ):
-    print("\nMultiple known devices detected.")
+    print("\nMultiple known devices detected. Grouping by device_id.")
     groups = complete["device_id"]
+elif complete["recording_day"].nunique() >= 4:
+    print("\nGrouping cross-validation by recording day.")
+    groups = complete["recording_day"]
 else:
     print("\nOnly one device detected.")
     print("Using held-out SESSION validation.")

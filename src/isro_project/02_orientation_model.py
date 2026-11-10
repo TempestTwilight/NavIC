@@ -323,12 +323,18 @@ y = df[target_col].astype(float)
 # GROUPS
 # ============================================================
 
+# Calendar day grouping (prevents sky geometry leakage from same-day sessions)
+df["recording_day"] = pd.to_datetime(df["UnixTimeMillis"], unit="ms").dt.date.astype(str)
+
 if (
     df["device_id"].nunique() > 1
     and not df["device_id"].astype(str).eq("unknown").all()
 ):
-    print("\nMultiple known devices detected.")
+    print("\nMultiple known devices detected. Grouping by device_id.")
     groups = df["device_id"]
+elif df["recording_day"].nunique() >= 4:
+    print("\nGrouping cross-validation by recording day.")
+    groups = df["recording_day"]
 else:
     print("\nUsing held-out SESSION validation.")
     groups = df["session_id"]
