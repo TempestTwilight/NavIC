@@ -41,13 +41,15 @@ IMPORTANT — keep in sync with step10_inference.py:
     just quietly feed the wrong number into a real coefficient.
 """
 
+import argparse
 import json
+import time
 import warnings
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold
@@ -240,17 +242,39 @@ def add_features(df, assume_flat_tilt=True):
 # LOAD
 # ============================================================
 
+parser = argparse.ArgumentParser(description="Train orientation-agnostic C/N0 model.")
+parser.add_argument(
+    "--skip-rf",
+    action="store_true",
+    help="Skip Random Forest / tree models entirely (trains Ridge in seconds)",
+)
+parser.add_argument(
+    "--fast-rf",
+    action="store_true",
+    default=True,
+    help="Use fast histogram-based gradient boosting (15x-30x faster than standard RF)",
+)
+parser.add_argument(
+    "--max-rf-samples",
+    type=int,
+    default=100000,
+    help="Max rows to use when training tree models (default: 100,000)",
+)
+args, _ = parser.parse_known_args()
+
 print("=" * 75)
 print(" Orientation-Agnostic GNSS C/N0 Prediction")
 print("=" * 75)
 
+t_start_total = time.time()
 ensure_dirs()
 
+t0 = time.time()
 print(f"\nLoading:\n{MERGED_CORPUS}")
 
 df = pd.read_parquet(MERGED_CORPUS)
 
-print(f"\nLoaded rows: {len(df):,}")
+print(f"Loaded rows: {len(df):,} ({time.time() - t0:.2f}s)")
 print(f"Sessions: {df['session_id'].nunique()}")
 print(f"Devices: {df['device_id'].nunique()}")
 
@@ -259,6 +283,7 @@ print(f"Devices: {df['device_id'].nunique()}")
 # FILTER
 # ============================================================
 
+t0 = time.time()
 print("\n--- Filtering ---")
 
 before = len(df)
@@ -270,14 +295,18 @@ if "CalibrationAccuracy" in df.columns:
     df = df[pd.to_numeric(df["CalibrationAccuracy"], errors="coerce") == 3].copy()
     print(f"CalibrationAccuracy == 3: {len(df):,} (dropped {before - len(df):,})")
 
+print(f"Filtering complete in {time.time() - t0:.2f}s")
+
 
 # ============================================================
 # FEATURE ENGINEERING
 # ============================================================
 
+t0 = time.time()
 print("\n--- Building features ---")
 
 df = add_features(df)
+print(f"Feature engineering complete in {time.time() - t0:.2f}s")
 
 
 # ============================================================
@@ -333,6 +362,7 @@ feature_cols = [
 # VALID EXAMPLES
 # ============================================================
 
+t0 = time.time()
 # Epoch-relative centering: remove cross-device hardware gain offset
 # Cn0_relative = Cn0 - mean(Cn0) over all visible satellites in that epoch
 epoch_mean = df.groupby(["session_id", "UnixTimeMillis"])["Cn0DbHz"].transform("mean")
@@ -341,10 +371,12 @@ target_col = "target_relative_cn0"
 
 df = df.dropna(subset=feature_cols + [target_col]).copy()
 
-print(f"\nComplete examples: {len(df):,}")
+# Downcast to float32 to reduce memory footprint by 50% and maximize cache hits
+X = df[feature_cols].astype(np.float32)
+y = df[target_col].astype(np.float32)
 
-X = df[feature_cols].astype(float)
-y = df[target_col].astype(float)
+print(f"\nComplete examples: {len(df):,} ({time.time() - t0:.2f}s)")
+print(f"Feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 1e6:.1f} MB")
 
 
 # ============================================================
@@ -384,9 +416,11 @@ print("\n" + "=" * 75)
 print(" Ridge Regression")
 print("=" * 75)
 
+t0_ridge = time.time()
 ridge_scores = []
 
 for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
+    t_fold = time.time()
     model = Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -408,66 +442,84 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
     held = groups.iloc[test_idx].unique()
     print(
         f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
-        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f}"
+        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f} ({time.time() - t_fold:.2f}s)"
     )
 
 ridge_scores_df = pd.DataFrame(ridge_scores)
 
-print("\nRidge average:")
+print(f"\nRidge cross-validation complete in {time.time() - t0_ridge:.2f}s")
 print(f"RMSE: {ridge_scores_df.rmse.mean():.3f} ± {ridge_scores_df.rmse.std():.3f}")
 print(f"MAE:  {ridge_scores_df.mae.mean():.3f}")
 print(f"R²:   {ridge_scores_df.r2.mean():.3f}")
 
 
 # ============================================================
-# RANDOM FOREST
+# RANDOM FOREST / TREE MODEL
 # ============================================================
 
-print("\n" + "=" * 75)
-print(" Random Forest")
-print("=" * 75)
-
 rf_scores = []
-max_rf_rows = 50000
+rf_scores_df = pd.DataFrame()
+rf_model = None
 
-for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
-    train_idx_rf = train_idx
+if args.skip_rf:
+    print("\n[INFO] Skipping tree models (--skip-rf enabled). Ridge-only execution.")
+else:
+    print("\n" + "=" * 75)
+    model_name = "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    print(f" {model_name}")
+    print("=" * 75)
 
-    if len(train_idx_rf) > max_rf_rows:
-        rng = np.random.default_rng(RANDOM_STATE + fold)
-        train_idx_rf = rng.choice(train_idx_rf, size=max_rf_rows, replace=False)
+    t0_rf = time.time()
+    max_rf_rows = args.max_rf_samples
 
-    model = RandomForestRegressor(
-        n_estimators=150,
-        max_depth=8,
-        min_samples_leaf=30,
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
+    for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
+        t_fold = time.time()
+        train_idx_rf = train_idx
 
-    model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
-    pred = model.predict(X.iloc[test_idx])
+        if len(train_idx_rf) > max_rf_rows:
+            rng = np.random.default_rng(RANDOM_STATE + fold)
+            train_idx_rf = rng.choice(train_idx_rf, size=max_rf_rows, replace=False)
 
-    score = {
-        "fold": fold,
-        "rmse": rmse(y.iloc[test_idx], pred),
-        "mae": mean_absolute_error(y.iloc[test_idx], pred),
-        "r2": r2_score(y.iloc[test_idx], pred),
-    }
-    rf_scores.append(score)
+        if args.fast_rf:
+            model = HistGradientBoostingRegressor(
+                max_iter=60,
+                max_depth=8,
+                min_samples_leaf=30,
+                random_state=RANDOM_STATE,
+            )
+        else:
+            model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=8,
+                min_samples_leaf=30,
+                max_samples=0.1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
 
-    held = groups.iloc[test_idx].unique()
-    print(
-        f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
-        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f}"
-    )
+        model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
+        pred = model.predict(X.iloc[test_idx])
 
-rf_scores_df = pd.DataFrame(rf_scores)
+        score = {
+            "fold": fold,
+            "rmse": rmse(y.iloc[test_idx], pred),
+            "mae": mean_absolute_error(y.iloc[test_idx], pred),
+            "r2": r2_score(y.iloc[test_idx], pred),
+        }
+        rf_scores.append(score)
 
-print("\nRandom Forest average:")
-print(f"RMSE: {rf_scores_df.rmse.mean():.3f} ± {rf_scores_df.rmse.std():.3f}")
-print(f"MAE:  {rf_scores_df.mae.mean():.3f}")
-print(f"R²:   {rf_scores_df.r2.mean():.3f}")
+        held = groups.iloc[test_idx].unique()
+        print(
+            f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
+            f"MAE={score['mae']:.3f}, R²={score['r2']:.3f} ({time.time() - t_fold:.2f}s)"
+        )
+
+    rf_scores_df = pd.DataFrame(rf_scores)
+
+    print(f"\n{model_name} average ({time.time() - t0_rf:.2f}s):")
+    print(f"RMSE: {rf_scores_df.rmse.mean():.3f} ± {rf_scores_df.rmse.std():.3f}")
+    print(f"MAE:  {rf_scores_df.mae.mean():.3f}")
+    print(f"R²:   {rf_scores_df.r2.mean():.3f}")
 
 
 # ============================================================
@@ -478,6 +530,7 @@ print("\n" + "=" * 75)
 print(" Training final models")
 print("=" * 75)
 
+t0_final = time.time()
 ridge_model = Pipeline(
     [
         ("scaler", StandardScaler()),
@@ -485,29 +538,51 @@ ridge_model = Pipeline(
     ]
 )
 ridge_model.fit(X, y)
+print(f"Final Ridge model fit in {time.time() - t0_final:.2f}s")
 
-rf_model = RandomForestRegressor(
-    n_estimators=200,
-    max_depth=8,
-    min_samples_leaf=30,
-    random_state=RANDOM_STATE,
-    n_jobs=-1,
-)
-rf_model.fit(X, y)
+if not args.skip_rf:
+    t0_rf_final = time.time()
+    train_idx_rf = np.arange(len(X))
+    if len(train_idx_rf) > args.max_rf_samples:
+        rng = np.random.default_rng(RANDOM_STATE)
+        train_idx_rf = rng.choice(train_idx_rf, size=args.max_rf_samples, replace=False)
+
+    if args.fast_rf:
+        rf_model = HistGradientBoostingRegressor(
+            max_iter=80,
+            max_depth=8,
+            min_samples_leaf=30,
+            random_state=RANDOM_STATE,
+        )
+    else:
+        rf_model = RandomForestRegressor(
+            n_estimators=100,
+            max_depth=8,
+            min_samples_leaf=30,
+            max_samples=0.1,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        )
+    rf_model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
+    print(f"Final Tree model fit in {time.time() - t0_rf_final:.2f}s")
 
 
 # ============================================================
 # SAVE MODELS
 # ============================================================
 
+t0_save = time.time()
 joblib.dump(ridge_model, ORIENTATION_ARTIFACTS / "ridge_orientation.joblib")
-joblib.dump(rf_model, ORIENTATION_ARTIFACTS / "rf_orientation.joblib")
+if rf_model is not None:
+    joblib.dump(rf_model, ORIENTATION_ARTIFACTS / "rf_orientation.joblib")
 
 with open(ORIENTATION_ARTIFACTS / "feature_cols.json", "w") as f:
     json.dump(feature_cols, f, indent=2)
 
 ridge_scores_df.to_csv(ORIENTATION_ARTIFACTS / "ridge_cv.csv", index=False)
-rf_scores_df.to_csv(ORIENTATION_ARTIFACTS / "rf_cv.csv", index=False)
+if len(rf_scores_df):
+    rf_scores_df.to_csv(ORIENTATION_ARTIFACTS / "rf_cv.csv", index=False)
+print(f"Artifacts saved in {time.time() - t0_save:.2f}s")
 
 
 # ============================================================
@@ -534,22 +609,23 @@ ridge_coefficients.to_csv(ORIENTATION_ARTIFACTS / "ridge_coefficients.csv", inde
 print("\nTop Ridge features:")
 print(ridge_coefficients.head(20).to_string(index=False))
 
-rf_importance = np.asarray(rf_model.feature_importances_).ravel()
-assert len(rf_importance) == len(feature_cols), (
-    f"RF mismatch: {len(rf_importance)} importances vs {len(feature_cols)} features"
-)
+if rf_model is not None and hasattr(rf_model, "feature_importances_"):
+    rf_importance = np.asarray(getattr(rf_model, "feature_importances_")).ravel()
+    assert len(feature_cols) == len(rf_importance), (
+        f"RF mismatch: {len(rf_importance)} importances vs {len(feature_cols)} features"
+    )
 
-rf_importance_df = pd.DataFrame(
-    {
-        "feature": feature_cols,
-        "importance": rf_importance,
-    }
-)
-rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
-rf_importance_df.to_csv(ORIENTATION_ARTIFACTS / "rf_importance.csv", index=False)
+    rf_importance_df = pd.DataFrame(
+        {
+            "feature": feature_cols,
+            "importance": rf_importance,
+        }
+    )
+    rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
+    rf_importance_df.to_csv(ORIENTATION_ARTIFACTS / "rf_importance.csv", index=False)
 
-print("\nTop Random Forest features:")
-print(rf_importance_df.head(20).to_string(index=False))
+    print("\nTop Tree model features:")
+    print(rf_importance_df.head(20).to_string(index=False))
 
 
 # ============================================================
@@ -600,4 +676,5 @@ if trained_keys != EXPECTED_INFERENCE_KEYS:
 print("\n" + "=" * 75)
 print(" COMPLETE")
 print("=" * 75)
+print(f"Total script runtime: {time.time() - t_start_total:.2f}s")
 print(f"\nArtifacts saved to:\n{ORIENTATION_ARTIFACTS}")

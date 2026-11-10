@@ -1,10 +1,12 @@
+import argparse
 import json
+import time
 import warnings
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold
@@ -175,12 +177,34 @@ def add_lag_feature(frame, value_col, lag_ms, output_col):
 # LOAD
 # ============================================================
 
+parser = argparse.ArgumentParser(description="Train temporal C/N0 forecasting model.")
+parser.add_argument(
+    "--skip-rf",
+    action="store_true",
+    help="Skip Random Forest / tree models entirely (trains Ridge in seconds)",
+)
+parser.add_argument(
+    "--fast-rf",
+    action="store_true",
+    default=True,
+    help="Use fast histogram-based gradient boosting (15x-30x faster than standard RF)",
+)
+parser.add_argument(
+    "--max-rf-samples",
+    type=int,
+    default=100000,
+    help="Max rows to use when training tree models (default: 100,000)",
+)
+args, _ = parser.parse_known_args()
+
 print("=" * 75)
-print(" Temporal GNSS C/N0 Prediction (t+1s)")
+print(" Temporal GNSS C/N0 Prediction (t+15s residual)")
 print("=" * 75)
 
+t_start_total = time.time()
 ensure_dirs()
 
+t0 = time.time()
 print(f"\nLoading:\n{MERGED_CORPUS}")
 
 if not MERGED_CORPUS.exists():
@@ -191,7 +215,7 @@ if not MERGED_CORPUS.exists():
 
 df = pd.read_parquet(MERGED_CORPUS)
 
-print(f"\nLoaded rows: {len(df):,}")
+print(f"Loaded rows: {len(df):,} ({time.time() - t0:.2f}s)")
 print(f"Sessions: {df['session_id'].nunique()}")
 print(f"Devices: {df['device_id'].nunique()}")
 print("\nDevice IDs:")
@@ -202,6 +226,7 @@ print(df["device_id"].value_counts())
 # FILTER
 # ============================================================
 
+t0 = time.time()
 print("\n--- Filtering ---")
 
 before = len(df)
@@ -226,29 +251,34 @@ df = df.dropna(subset=["UnixTimeMillis"]).copy()
 # every downstream temporal-feature step is safe.
 before = len(df)
 df = df.dropna(subset=SIGNAL_KEYS).copy()
-print(f"\nDropped {before - len(df):,} rows with missing signal-id fields")
+print(f"Dropped {before - len(df):,} rows with missing signal-id fields ({time.time() - t0:.2f}s)")
 
 
 # ============================================================
 # STATIC FEATURES
 # ============================================================
 
+t0 = time.time()
 print("\n--- Building static features ---")
 df = add_static_features(df)
+print(f"Static features built in {time.time() - t0:.2f}s")
 
 
 # ============================================================
 # SORT
 # ============================================================
 
+t0 = time.time()
 print("\n--- Sorting signal tracks ---")
 df = df.sort_values(SIGNAL_KEYS + ["UnixTimeMillis"]).reset_index(drop=True)
+print(f"Sorted in {time.time() - t0:.2f}s")
 
 
 # ============================================================
 # TEMPORAL FEATURES
 # ============================================================
 
+t0 = time.time()
 print("\n--- Building temporal features ---")
 
 lags = [
@@ -259,23 +289,30 @@ lags = [
 ]
 
 for lag_ms, output_col in lags:
+    t_lag = time.time()
     print(f"  Adding C/N0 lag {lag_ms / 1000:g}s...")
     df = add_lag_feature(df, "Cn0DbHz", lag_ms, output_col)
+    print(f"    Added in {time.time() - t_lag:.2f}s")
 
 for lag_ms, output_col in [
     (1000, "elevation_lag_1s"),
     (5000, "elevation_lag_5s"),
     (1000, "azimuth_lag_1s"),
 ]:
+    t_lag = time.time()
     print(f"  Adding {output_col}...")
     source_col = "ElevationDegrees" if "elevation" in output_col else "AzimuthDegrees"
     df = add_lag_feature(df, source_col, lag_ms, output_col)
+    print(f"    Added in {time.time() - t_lag:.2f}s")
+
+print(f"All temporal features built in {time.time() - t0:.2f}s")
 
 
 # ============================================================
 # TEMPORAL DERIVATIVES
 # ============================================================
 
+t0 = time.time()
 print("\n--- Building temporal derivatives ---")
 
 df["cn0_delta_1s"] = df["Cn0DbHz"] - df["cn0_lag_1s"]
@@ -288,17 +325,15 @@ df["cn0_slope_5s"] = (df["Cn0DbHz"] - df["cn0_lag_5s"]) / 5.0
 df["elevation_delta_1s"] = df["ElevationDegrees"] - df["elevation_lag_1s"]
 df["elevation_delta_5s"] = df["ElevationDegrees"] - df["elevation_lag_5s"]
 df["azimuth_delta_1s"] = circular_delta_deg(df["AzimuthDegrees"], df["azimuth_lag_1s"])
+print(f"Derivatives built in {time.time() - t0:.2f}s")
 
 
 # ============================================================
 # FUTURE TARGET
 # ============================================================
 
-print("\n--- Constructing t -> t+1 second target ---")
-
-# FIX: same row-duplication risk as add_lag_feature, fixed the
-# same way -- assign back by original index, not by a
-# key-based merge.
+t0 = time.time()
+print(f"\n--- Constructing t -> t+{HORIZON_MS/1000:g}s target ---")
 
 target_left = df[SIGNAL_KEYS + ["UnixTimeMillis"]].copy()
 target_left["_orig_index"] = df.index.values
@@ -327,6 +362,7 @@ target_raw.loc[future["_orig_index"].values] = future["target_cn0_raw"].values
 # Residual target: delta Cn0 = future_cn0 - current_cn0
 df["target_delta_cn0"] = target_raw - df["Cn0DbHz"]
 df["target_cn0"] = df["target_delta_cn0"]
+print(f"Target constructed in {time.time() - t0:.2f}s")
 
 
 # ============================================================
@@ -398,8 +434,11 @@ complete = df.dropna(subset=required_cols).copy()
 print(f"\nComplete temporal examples: {len(complete):,}")
 print(f"Dropped: {len(df) - len(complete):,}")
 
-X = complete[feature_cols].astype(float)
-y = complete["target_cn0"].astype(float)
+# Downcast to float32 to halve memory footprint and maximize CPU cache hits
+X = complete[feature_cols].astype(np.float32)
+y = complete["target_cn0"].astype(np.float32)
+
+print(f"\nFinal feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 1e6:.1f} MB")
 
 
 # ============================================================
@@ -446,9 +485,11 @@ print("\n" + "=" * 75)
 print(" Ridge Regression")
 print("=" * 75)
 
+t0_ridge = time.time()
 ridge_scores = []
 
 for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
+    t_fold = time.time()
     model = Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -470,66 +511,84 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
     held = groups.iloc[test_idx].unique()
     print(
         f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
-        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f}"
+        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f} ({time.time() - t_fold:.2f}s)"
     )
 
 ridge_scores_df = pd.DataFrame(ridge_scores)
 
-print("\nRidge average:")
+print(f"\nRidge cross-validation complete in {time.time() - t0_ridge:.2f}s")
 print(f"RMSE: {ridge_scores_df.rmse.mean():.3f} ± {ridge_scores_df.rmse.std():.3f}")
 print(f"MAE:  {ridge_scores_df.mae.mean():.3f}")
 print(f"R²:   {ridge_scores_df.r2.mean():.3f}")
 
 
 # ============================================================
-# RANDOM FOREST CV
+# RANDOM FOREST / TREE MODEL CV
 # ============================================================
 
-print("\n" + "=" * 75)
-print(" Random Forest")
-print("=" * 75)
-
 rf_scores = []
-max_rf_rows = 50000
+rf_scores_df = pd.DataFrame()
+rf_model = None
 
-for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
-    if len(train_idx) > max_rf_rows:
-        rng = np.random.default_rng(RANDOM_STATE + fold)
-        train_idx_rf = rng.choice(train_idx, size=max_rf_rows, replace=False)
-    else:
-        train_idx_rf = train_idx
+if args.skip_rf:
+    print("\n[INFO] Skipping tree models (--skip-rf enabled). Ridge-only execution.")
+else:
+    print("\n" + "=" * 75)
+    model_name = "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    print(f" {model_name}")
+    print("=" * 75)
 
-    model = RandomForestRegressor(
-        n_estimators=150,
-        max_depth=8,
-        min_samples_leaf=30,
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
+    t0_rf = time.time()
+    max_rf_rows = args.max_rf_samples
 
-    model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
-    pred = model.predict(X.iloc[test_idx])
+    for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
+        t_fold = time.time()
+        if len(train_idx) > max_rf_rows:
+            rng = np.random.default_rng(RANDOM_STATE + fold)
+            train_idx_rf = rng.choice(train_idx, size=max_rf_rows, replace=False)
+        else:
+            train_idx_rf = train_idx
 
-    score = {
-        "fold": fold,
-        "rmse": rmse(y.iloc[test_idx], pred),
-        "mae": mean_absolute_error(y.iloc[test_idx], pred),
-        "r2": r2_score(y.iloc[test_idx], pred),
-    }
-    rf_scores.append(score)
+        if args.fast_rf:
+            model = HistGradientBoostingRegressor(
+                max_iter=60,
+                max_depth=8,
+                min_samples_leaf=30,
+                random_state=RANDOM_STATE,
+            )
+        else:
+            model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=8,
+                min_samples_leaf=30,
+                max_samples=0.1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
 
-    held = groups.iloc[test_idx].unique()
-    print(
-        f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
-        f"MAE={score['mae']:.3f}, R²={score['r2']:.3f}"
-    )
+        model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
+        pred = model.predict(X.iloc[test_idx])
 
-rf_scores_df = pd.DataFrame(rf_scores)
+        score = {
+            "fold": fold,
+            "rmse": rmse(y.iloc[test_idx], pred),
+            "mae": mean_absolute_error(y.iloc[test_idx], pred),
+            "r2": r2_score(y.iloc[test_idx], pred),
+        }
+        rf_scores.append(score)
 
-print("\nRandom Forest average:")
-print(f"RMSE: {rf_scores_df.rmse.mean():.3f} ± {rf_scores_df.rmse.std():.3f}")
-print(f"MAE:  {rf_scores_df.mae.mean():.3f}")
-print(f"R²:   {rf_scores_df.r2.mean():.3f}")
+        held = groups.iloc[test_idx].unique()
+        print(
+            f"Fold {fold}: held={held}, RMSE={score['rmse']:.3f}, "
+            f"MAE={score['mae']:.3f}, R²={score['r2']:.3f} ({time.time() - t_fold:.2f}s)"
+        )
+
+    rf_scores_df = pd.DataFrame(rf_scores)
+
+    print(f"\n{model_name} average ({time.time() - t0_rf:.2f}s):")
+    print(f"RMSE: {rf_scores_df.rmse.mean():.3f} ± {rf_scores_df.rmse.std():.3f}")
+    print(f"MAE:  {rf_scores_df.mae.mean():.3f}")
+    print(f"R²:   {rf_scores_df.r2.mean():.3f}")
 
 
 # ============================================================
@@ -540,6 +599,7 @@ print("\n" + "=" * 75)
 print(" Training final models")
 print("=" * 75)
 
+t0_final = time.time()
 ridge_model = Pipeline(
     [
         ("scaler", StandardScaler()),
@@ -547,15 +607,33 @@ ridge_model = Pipeline(
     ]
 )
 ridge_model.fit(X, y)
+print(f"Final Ridge model fit in {time.time() - t0_final:.2f}s")
 
-rf_model = RandomForestRegressor(
-    n_estimators=200,
-    max_depth=8,
-    min_samples_leaf=30,
-    random_state=RANDOM_STATE,
-    n_jobs=-1,
-)
-rf_model.fit(X, y)
+if not args.skip_rf:
+    t0_rf_final = time.time()
+    train_idx_rf = np.arange(len(X))
+    if len(train_idx_rf) > args.max_rf_samples:
+        rng = np.random.default_rng(RANDOM_STATE)
+        train_idx_rf = rng.choice(train_idx_rf, size=args.max_rf_samples, replace=False)
+
+    if args.fast_rf:
+        rf_model = HistGradientBoostingRegressor(
+            max_iter=80,
+            max_depth=8,
+            min_samples_leaf=30,
+            random_state=RANDOM_STATE,
+        )
+    else:
+        rf_model = RandomForestRegressor(
+            n_estimators=100,
+            max_depth=8,
+            min_samples_leaf=30,
+            max_samples=0.1,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        )
+    rf_model.fit(X.iloc[train_idx_rf], y.iloc[train_idx_rf])
+    print(f"Final Tree model fit in {time.time() - t0_rf_final:.2f}s")
 
 
 # ============================================================
@@ -583,35 +661,39 @@ ridge_coefficients.to_csv(TEMPORAL_ARTIFACTS / "ridge_coefficients.csv", index=F
 print("\nTop Ridge features:")
 print(ridge_coefficients.head(20).to_string(index=False))
 
-rf_importance = np.asarray(rf_model.feature_importances_).ravel()
-print("\nRF importance count:", len(rf_importance))
-assert len(feature_cols) == len(rf_importance), "Feature/RF importance mismatch"
+if rf_model is not None and hasattr(rf_model, "feature_importances_"):
+    rf_importance = np.asarray(getattr(rf_model, "feature_importances_")).ravel()
+    assert len(feature_cols) == len(rf_importance), "Feature/RF importance mismatch"
 
-rf_importance_df = pd.DataFrame(
-    {
-        "feature": feature_cols,
-        "importance": rf_importance,
-    }
-)
-rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
-rf_importance_df.to_csv(TEMPORAL_ARTIFACTS / "rf_importance.csv", index=False)
+    rf_importance_df = pd.DataFrame(
+        {
+            "feature": feature_cols,
+            "importance": rf_importance,
+        }
+    )
+    rf_importance_df = rf_importance_df.sort_values("importance", ascending=False)
+    rf_importance_df.to_csv(TEMPORAL_ARTIFACTS / "rf_importance.csv", index=False)
 
-print("\nTop Random Forest features:")
-print(rf_importance_df.head(20).to_string(index=False))
+    print("\nTop Tree model features:")
+    print(rf_importance_df.head(20).to_string(index=False))
 
 
 # ============================================================
 # SAVE MODELS
 # ============================================================
 
+t0_save = time.time()
 joblib.dump(ridge_model, TEMPORAL_ARTIFACTS / "ridge_temporal_1s.joblib")
-joblib.dump(rf_model, TEMPORAL_ARTIFACTS / "rf_temporal_1s.joblib")
+if rf_model is not None:
+    joblib.dump(rf_model, TEMPORAL_ARTIFACTS / "rf_temporal_1s.joblib")
 
 with open(TEMPORAL_ARTIFACTS / "feature_cols.json", "w") as f:
     json.dump(feature_cols, f, indent=2)
 
 ridge_scores_df.to_csv(TEMPORAL_ARTIFACTS / "ridge_cv.csv", index=False)
-rf_scores_df.to_csv(TEMPORAL_ARTIFACTS / "rf_cv.csv", index=False)
+if len(rf_scores_df):
+    rf_scores_df.to_csv(TEMPORAL_ARTIFACTS / "rf_cv.csv", index=False)
+print(f"Artifacts saved in {time.time() - t0_save:.2f}s")
 
 
 # ============================================================
@@ -622,12 +704,14 @@ print("\n" + "=" * 75)
 print(" Signal Selection Evaluation")
 print("=" * 75)
 
+t0_sel = time.time()
 # We evaluate selection on CV test folds rather than on the
 # final model's training predictions.
 
 selection_records = []
 
 for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
+    t_sel_fold = time.time()
     print(f"\nSelection fold {fold}")
 
     ridge_cv = Pipeline(
@@ -639,25 +723,38 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
     ridge_cv.fit(X.iloc[train_idx], y.iloc[train_idx])
     ridge_pred = ridge_cv.predict(X.iloc[test_idx])
 
-    if len(train_idx) > max_rf_rows:
-        rng = np.random.default_rng(RANDOM_STATE + 100 + fold)
-        rf_train_idx = rng.choice(train_idx, size=max_rf_rows, replace=False)
-    else:
-        rf_train_idx = train_idx
+    if not args.skip_rf:
+        if len(train_idx) > max_rf_rows:
+            rng = np.random.default_rng(RANDOM_STATE + 100 + fold)
+            rf_train_idx = rng.choice(train_idx, size=max_rf_rows, replace=False)
+        else:
+            rf_train_idx = train_idx
 
-    rf_cv = RandomForestRegressor(
-        n_estimators=150,
-        max_depth=8,
-        min_samples_leaf=30,
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
-    rf_cv.fit(X.iloc[rf_train_idx], y.iloc[rf_train_idx])
-    rf_pred = rf_cv.predict(X.iloc[test_idx])
+        if args.fast_rf:
+            rf_cv = HistGradientBoostingRegressor(
+                max_iter=60,
+                max_depth=8,
+                min_samples_leaf=30,
+                random_state=RANDOM_STATE,
+            )
+        else:
+            rf_cv = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=8,
+                min_samples_leaf=30,
+                max_samples=0.1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
+        rf_cv.fit(X.iloc[rf_train_idx], y.iloc[rf_train_idx])
+        rf_pred = rf_cv.predict(X.iloc[test_idx])
+    else:
+        rf_pred = None
 
     test = complete.iloc[test_idx].copy()
     test["ridge_pred"] = ridge_pred
-    test["rf_pred"] = rf_pred
+    if rf_pred is not None:
+        test["rf_pred"] = rf_pred
 
     # Persistence baseline: current C/N0 predicts future C/N0
     test["persistence_pred"] = test["Cn0DbHz"]
@@ -681,44 +778,46 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
         ridge_actual = g.loc[ridge_idx, "target_cn0"]
         ridge_regret = actual_best - ridge_actual
 
-        rf_idx = g["rf_pred"].idxmax()
-        rf_actual = g.loc[rf_idx, "target_cn0"]
-        rf_regret = actual_best - rf_actual
-
         top3_ridge = g.sort_values("ridge_pred", ascending=False).head(3)
-        top3_rf = g.sort_values("rf_pred", ascending=False).head(3)
         top3_persistence = g.sort_values("persistence_pred", ascending=False).head(3)
 
         ridge_top3 = {signal_tuple(row) for _, row in top3_ridge.iterrows()}
-        rf_top3 = {signal_tuple(row) for _, row in top3_rf.iterrows()}
         persistence_top3 = {signal_tuple(row) for _, row in top3_persistence.iterrows()}
 
-        selection_records.append(
-            {
-                "fold": fold,
-                "device_id": group_key[0],
-                "session_id": group_key[1],
-                "UnixTimeMillis": group_key[2],
-                "num_candidates": len(g),
-                "actual_best_cn0": actual_best,
-                "persistence_selected_cn0": persistence_actual,
-                "ridge_selected_cn0": ridge_actual,
-                "rf_selected_cn0": rf_actual,
-                "persistence_regret": persistence_regret,
-                "ridge_regret": ridge_regret,
-                "rf_regret": rf_regret,
-                "persistence_top1": int(
-                    signal_tuple(g.loc[persistence_idx]) == actual_signal_tuple
-                ),
-                "ridge_top1": int(
-                    signal_tuple(g.loc[ridge_idx]) == actual_signal_tuple
-                ),
-                "rf_top1": int(signal_tuple(g.loc[rf_idx]) == actual_signal_tuple),
-                "persistence_top3": int(actual_signal_tuple in persistence_top3),
-                "ridge_top3": int(actual_signal_tuple in ridge_top3),
-                "rf_top3": int(actual_signal_tuple in rf_top3),
-            }
-        )
+        rec = {
+            "fold": fold,
+            "device_id": group_key[0],
+            "session_id": group_key[1],
+            "UnixTimeMillis": group_key[2],
+            "num_candidates": len(g),
+            "actual_best_cn0": actual_best,
+            "persistence_selected_cn0": persistence_actual,
+            "ridge_selected_cn0": ridge_actual,
+            "persistence_regret": persistence_regret,
+            "ridge_regret": ridge_regret,
+            "persistence_top1": int(
+                signal_tuple(g.loc[persistence_idx]) == actual_signal_tuple
+            ),
+            "ridge_top1": int(
+                signal_tuple(g.loc[ridge_idx]) == actual_signal_tuple
+            ),
+            "persistence_top3": int(actual_signal_tuple in persistence_top3),
+            "ridge_top3": int(actual_signal_tuple in ridge_top3),
+        }
+
+        if rf_pred is not None:
+            rf_idx = g["rf_pred"].idxmax()
+            rf_actual = g.loc[rf_idx, "target_cn0"]
+            rf_regret = actual_best - rf_actual
+            top3_rf = g.sort_values("rf_pred", ascending=False).head(3)
+            rf_top3 = {signal_tuple(row) for _, row in top3_rf.iterrows()}
+            rec["rf_selected_cn0"] = rf_actual
+            rec["rf_regret"] = rf_regret
+            rec["rf_top1"] = int(signal_tuple(g.loc[rf_idx]) == actual_signal_tuple)
+            rec["rf_top3"] = int(actual_signal_tuple in rf_top3)
+
+        selection_records.append(rec)
+    print(f"  Selection fold {fold} complete in {time.time() - t_sel_fold:.2f}s")
 
 selection_df = pd.DataFrame(selection_records)
 
@@ -728,9 +827,13 @@ selection_df = pd.DataFrame(selection_records)
 # ============================================================
 
 if len(selection_df) > 0:
-    print("\n--- Selection results ---")
+    print(f"\n--- Selection results ({time.time() - t0_sel:.2f}s) ---")
 
-    for name in ["persistence", "ridge", "rf"]:
+    eval_models = ["persistence", "ridge"]
+    if not args.skip_rf and "rf_top1" in selection_df.columns:
+        eval_models.append("rf")
+
+    for name in eval_models:
         print(f"\n{name.upper()}")
         print(f"Top-1 accuracy: {100 * selection_df[name + '_top1'].mean():.2f}%")
         print(f"Top-3 accuracy: {100 * selection_df[name + '_top3'].mean():.2f}%")
@@ -752,7 +855,7 @@ if len(selection_df) > 0:
                 "mean_regret_dbhz": selection_df[name + "_regret"].mean(),
                 "median_regret_dbhz": selection_df[name + "_regret"].median(),
             }
-            for name in ["persistence", "ridge", "rf"]
+            for name in eval_models
         ]
     )
     selection_summary.to_csv(TEMPORAL_ARTIFACTS / "selection_summary.csv", index=False)
@@ -771,4 +874,5 @@ else:
 print("\n" + "=" * 75)
 print(" COMPLETE")
 print("=" * 75)
+print(f"Total script runtime: {time.time() - t_start_total:.2f}s")
 print(f"\nArtifacts saved to:\n{TEMPORAL_ARTIFACTS}")
