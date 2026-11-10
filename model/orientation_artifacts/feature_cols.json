@@ -1,14 +1,13 @@
 [
+  "s_body_x",
+  "s_body_y",
+  "s_body_z",
   "cos_inc",
-  "inc_deg",
   "elevation_sin",
-  "elevation_cos",
   "is_above_horizon",
   "rel_az_sin",
   "rel_az_cos",
-  "airmass_simple",
   "airmass_ky",
-  "freq_ghz",
   "freq_loss_db",
   "is_gps",
   "is_sbas",
@@ -19,8 +18,5 @@
   "is_navic",
   "rel_az_x_el",
   "cos_inc_x_airmass",
-  "navic_x_airmass",
-  "gps_x_airmass",
-  "galileo_x_airmass",
   "freq_loss_x_elev"
 ]

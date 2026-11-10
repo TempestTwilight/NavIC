@@ -92,17 +92,17 @@ class OptimizerPipeline(
         }
 
         // ==========================================
-        // STAGE 1: TEMPORAL RIDGE MODEL INFERENCE
+        // STAGE 1: TEMPORAL RIDGE MODEL INFERENCE (Predicts deltaCn0 = futureCn0 - currentCn0)
         // ==========================================
-        var predTemporalSum = 0.0
+        var predDeltaSum = 0.0
         var validTemporalPredictions = 0
         var topTemporalContributors: List<RidgeModel.FeatureContribution> = emptyList()
 
         for (obs in currentObs) {
             val track = gnssRepository.tracks[obs.signalKey] ?: continue
             if (buildTemporalFeatures(obs, track, orientation, temporalFeatureBuffer)) {
-                val pred = temporalModel.predict(temporalFeatureBuffer)
-                predTemporalSum += pred
+                val predDelta = temporalModel.predict(temporalFeatureBuffer)
+                predDeltaSum += predDelta
                 validTemporalPredictions++
 
                 if (topTemporalContributors.isEmpty()) {
@@ -111,13 +111,12 @@ class OptimizerPipeline(
             }
         }
 
-        val predictedCn0 = if (validTemporalPredictions > 0) {
-            predTemporalSum / validTemporalPredictions
+        val deltaCn0 = if (validTemporalPredictions > 0) {
+            predDeltaSum / validTemporalPredictions
         } else {
-            currentMeanCn0
+            0.0
         }
-
-        val deltaCn0 = predictedCn0 - currentMeanCn0
+        val predictedCn0 = currentMeanCn0 + deltaCn0
         // Degradation condition: predicted drop >= 1.5 dB-Hz OR absolute weak signal < 28 dB-Hz
         val isDegradation = (deltaCn0 <= -1.5) || (currentMeanCn0 < 28.0)
 
