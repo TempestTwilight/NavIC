@@ -37,6 +37,7 @@ from pathlib import Path
 import logging
 import sys
 import numpy as np
+import pandas as pd
 import duckdb
 
 from .config import (
@@ -45,6 +46,7 @@ from .config import (
     MERGED_OUTPUT_DIR,
     MAX_ORIENTATION_DT_MS,
     DUCKDB_MEMORY_LIMIT,
+    RAW_LOGS_DIR,
     ensure_dirs,
 )
 
@@ -107,6 +109,68 @@ def build_device_id_map(raw_logs_dir: Path) -> dict[str, str]:
         mapping[txt.stem] = _parse_device_id(txt)
     log.info(f"Device ID map: {len(mapping)} logs → {set(mapping.values())}")
     return mapping
+
+
+def build_device_time_intervals(raw_logs_dir: Path) -> pd.DataFrame:
+    """Scan raw .txt logs and return a DataFrame of (device_id, min_time, max_time).
+
+    Each row represents one raw log file's time span, extracted by scanning the
+    'Status,' lines for UnixTimeMillis values.  This lets us join sessions
+    (reconstructed from the combined Parquet) back to their originating device.
+    """
+    rows: list[dict] = []
+    if not raw_logs_dir.exists():
+        log.warning(f"Raw logs directory not found: {raw_logs_dir}")
+        return pd.DataFrame(columns=["device_id", "min_time", "max_time"])
+
+    for txt in raw_logs_dir.rglob("*.txt"):
+        dev = _parse_device_id(txt)
+        if dev == "unknown":
+            continue
+        min_t: int | None = None
+        max_t: int | None = None
+        try:
+            with open(txt, "r", errors="ignore") as fh:
+                for line in fh:
+                    if line.startswith("Status,"):
+                        parts = line.split(",")
+                        try:
+                            t = int(parts[1])
+                            if min_t is None or t < min_t:
+                                min_t = t
+                            if max_t is None or t > max_t:
+                                max_t = t
+                        except (ValueError, IndexError):
+                            pass
+        except OSError:
+            continue
+        if min_t is not None:
+            rows.append({"device_id": dev, "min_time": min_t, "max_time": max_t})
+
+    df = pd.DataFrame(rows)
+    if len(df):
+        log.info(
+            f"Device time intervals: {len(df)} logs across "
+            f"{df['device_id'].nunique()} devices"
+        )
+    else:
+        log.warning("No device time intervals found — device_id will default to 'unknown'")
+    return df
+
+
+def register_device_intervals(con: duckdb.DuckDBPyConnection, raw_logs_dir: Path) -> None:
+    """Build and register the device_intervals table in DuckDB.
+
+    Creates a DuckDB table `device_intervals(device_id, min_time, max_time)` so
+    both merge paths can join session time-bounds against it to resolve device_id.
+    """
+    intervals_df = build_device_time_intervals(raw_logs_dir)
+    con.register("_device_intervals_df", intervals_df)
+    con.execute("""
+        CREATE OR REPLACE TABLE device_intervals AS
+        SELECT * FROM _device_intervals_df
+    """)
+    con.unregister("_device_intervals_df")
 
 
 def sql_escape(path: Path) -> str:
@@ -231,14 +295,32 @@ def merge_parquet_sources(con: duckdb.DuckDBPyConnection):
                 'session_' || CAST(SUM(is_new_sess) OVER (ORDER BY UnixTimeMillis) AS VARCHAR) as session_id
             FROM with_gap
         ),
+        session_bounds AS (
+            SELECT 
+                session_id,
+                MIN(UnixTimeMillis) as sess_start,
+                MAX(UnixTimeMillis) as sess_end
+            FROM session_map
+            GROUP BY session_id
+        ),
+        session_devices AS (
+            SELECT 
+                sb.session_id,
+                COALESCE(FIRST(di.device_id), 'oneplus') as device_id
+            FROM session_bounds sb
+            LEFT JOIN device_intervals di
+              ON di.min_time <= sb.sess_end + 2000 AND di.max_time >= sb.sess_start - 2000
+            GROUP BY sb.session_id
+        ),
         status_with_sess AS (
             SELECT 
                 s.UnixTimeMillis, s.SignalCount, s.SignalIndex, s.ConstellationType, s.Svid,
                 s.CarrierFrequencyHz, s.Cn0DbHz, s.AzimuthDegrees, s.ElevationDegrees,
                 s.UsedInFix, s.HasAlmanacData, s.HasEphemerisData, s.BasebandCn0DbHz,
-                sm.session_id, 'oneplus' as device_id
+                sm.session_id, sd.device_id
             FROM read_parquet('{status_path}') s
             JOIN session_map sm ON s.UnixTimeMillis = sm.UnixTimeMillis
+            JOIN session_devices sd ON sm.session_id = sd.session_id
             WHERE s.Cn0DbHz > 0
         )
         SELECT 
@@ -288,30 +370,55 @@ def merge_csv_sources(con: duckdb.DuckDBPyConnection):
     query = f"""
     COPY (
         WITH status_raw AS (
-            SELECT 
-                CAST(column1 AS BIGINT) as UnixTimeMillis,
-                CAST(column2 AS BIGINT) as SignalCount,
-                CAST(column3 AS BIGINT) as SignalIndex,
-                CAST(column4 AS BIGINT) as ConstellationType,
-                CAST(column5 AS BIGINT) as Svid,
-                CAST(column6 AS BIGINT) as CarrierFrequencyHz,
-                CAST(column7 AS DOUBLE) as Cn0DbHz,
-                CAST(column8 AS DOUBLE) as AzimuthDegrees,
-                CAST(column9 AS DOUBLE) as ElevationDegrees,
-                CAST(column10 AS BIGINT) as UsedInFix,
-                CAST(column11 AS BIGINT) as HasAlmanacData,
-                CAST(column12 AS BIGINT) as HasEphemerisData,
-                CAST(column13 AS DOUBLE) as BasebandCn0DbHz,
-                regexp_extract(filename, '([^/]+)/Status\\\\.csv$', 1) as session_id,
-                'oneplus' as device_id
-            FROM read_csv('{status_glob}', 
-                header=true, 
-                skip=0,
-                filename=true,
-                ignore_errors=false,
-                all_varchar=false)
-            WHERE column7 IS NOT NULL AND CAST(column7 AS DOUBLE) > 0
-        ),
+     SELECT 
+         CAST(column1 AS BIGINT) as UnixTimeMillis,
+         CAST(column2 AS BIGINT) as SignalCount,
+         CAST(column3 AS BIGINT) as SignalIndex,
+         CAST(column4 AS BIGINT) as ConstellationType,
+         CAST(column5 AS BIGINT) as Svid,
+         CAST(column6 AS BIGINT) as CarrierFrequencyHz,
+         CAST(column7 AS DOUBLE) as Cn0DbHz,
+         CAST(column8 AS DOUBLE) as AzimuthDegrees,
+         CAST(column9 AS DOUBLE) as ElevationDegrees,
+         CAST(column10 AS BIGINT) as UsedInFix,
+         CAST(column11 AS BIGINT) as HasAlmanacData,
+         CAST(column12 AS BIGINT) as HasEphemerisData,
+         CAST(column13 AS DOUBLE) as BasebandCn0DbHz,
+         regexp_extract(filename, '([^/]+)/Status\\\\.csv$', 1) as session_id
+     FROM read_csv('{status_glob}', 
+         header=true, 
+         skip=0,
+         filename=true,
+         ignore_errors=false,
+         all_varchar=false)
+     WHERE column7 IS NOT NULL AND CAST(column7 AS DOUBLE) > 0
+ ),
+ session_bounds AS (
+     SELECT 
+         session_id,
+         MIN(UnixTimeMillis) as sess_start,
+         MAX(UnixTimeMillis) as sess_end
+     FROM status_raw
+     GROUP BY session_id
+ ),
+ session_devices AS (
+     SELECT 
+         sb.session_id,
+         COALESCE(FIRST(di.device_id), 'oneplus') as device_id
+     FROM session_bounds sb
+     LEFT JOIN device_intervals di
+       ON di.min_time <= sb.sess_end + 2000 AND di.max_time >= sb.sess_start - 2000
+     GROUP BY sb.session_id
+ ),
+ status_with_sess AS (
+     SELECT 
+         sr.UnixTimeMillis, sr.SignalCount, sr.SignalIndex, sr.ConstellationType, sr.Svid,
+         sr.CarrierFrequencyHz, sr.Cn0DbHz, sr.AzimuthDegrees, sr.ElevationDegrees,
+         sr.UsedInFix, sr.HasAlmanacData, sr.HasEphemerisData, sr.BasebandCn0DbHz,
+         sr.session_id, sd.device_id
+     FROM status_raw sr
+     JOIN session_devices sd ON sr.session_id = sd.session_id
+ ),
         orient_raw AS (
             SELECT 
                 CAST(column1 AS BIGINT) as utcTimeMillis,
@@ -477,6 +584,9 @@ def main():
     con.execute("SET preserve_insertion_order = false;")
 
     try:
+        # Register raw log device intervals if available
+        register_device_intervals(con, RAW_LOGS_DIR)
+
         # Determine source and merge
         if STATUS_PQ.exists() and ORIENT_PQ.exists():
             merge_parquet_sources(con)

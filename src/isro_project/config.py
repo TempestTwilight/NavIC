@@ -37,6 +37,9 @@ GNSS_PARQUET_DIR = _env_path(
     "ISRO_GNSS_PARQUET_DIR", LOCAL_ROOT / "gnss-eda" / "data" / "parquet"
 )
 
+# Raw GNSS logger text files
+RAW_LOGS_DIR = _env_path("ISRO_RAW_LOGS_DIR", LOCAL_ROOT / "data" / "Raw_Logs")
+
 # Test data for inference
 TEST_DATA_DIR = _env_path("ISRO_TEST_DATA_DIR", LOCAL_ROOT / "data" / "test")
 
