@@ -153,6 +153,30 @@ def add_features(df, assume_flat_tilt=True):
     n_up = np.cos(roll) * np.cos(pitch)
 
     # --------------------------------------------------------
+    # 3D Body-frame satellite vectors (if not already present)
+    # --------------------------------------------------------
+    if "s_body_x" not in df.columns or df["s_body_x"].isna().all():
+        cy, sy = np.cos(yaw), np.sin(yaw)
+        cp, sp = np.cos(pitch), np.sin(pitch)
+        cr, sr = np.cos(roll), np.sin(roll)
+
+        r00 = cy * cp
+        r01 = cy * sp * sr - sy * cr
+        r02 = cy * sp * cr + sy * sr
+
+        r10 = sy * cp
+        r11 = sy * sp * sr + cy * cr
+        r12 = sy * sp * cr - cy * sr
+
+        r20 = -sp
+        r21 = cp * sr
+        r22 = cp * cr
+
+        df["s_body_x"] = np.clip(r00 * s_east + r01 * s_north + r02 * s_up, -1.0, 1.0)
+        df["s_body_y"] = np.clip(r10 * s_east + r11 * s_north + r12 * s_up, -1.0, 1.0)
+        df["s_body_z"] = np.clip(r20 * s_east + r21 * s_north + r22 * s_up, -1.0, 1.0)
+
+    # --------------------------------------------------------
     # Antenna Incidence Angle (dot product s·n)
     # --------------------------------------------------------
 
@@ -275,6 +299,10 @@ df = add_features(df)
 # ============================================================
 
 feature_cols = [
+    # 3D body-frame satellite vectors (replaces Euler-angle incidence dot products)
+    "s_body_x",
+    "s_body_y",
+    "s_body_z",
     # Core physics-based geometry
     "cos_inc",
     "elevation_sin",

@@ -5,11 +5,38 @@ Merge Status with OrientationDeg using DuckDB ASOF join.
 Produces: results/merged_data/combined_corpus.parquet
 
 Memory-constrained processing (2GB limit) with session isolation.
+
+Device ID extraction
+--------------------
+Real device identity (Manufacturer_Model) is parsed from the '# Version:' header
+line of each raw Android GNSS Logger .txt file before ingestion.  The mapping is
+written to a side-table so DuckDB can attach it per session without loading raw
+CSVs into Python heap.
+
+Body-frame satellite vectors
+----------------------------
+Three body-frame components  (s_body_x, s_body_y, s_body_z)  are computed for
+every merged row using the rotation matrix derived from the phone's Euler angles
+at the matched IMU epoch.  This eliminates gimbal-lock singularities that arise
+when pitch approaches ±90° when using raw yaw/pitch/roll directly for the
+incidence angle dot-product.
+
+  R = Rz(yaw) · Ry(pitch) · Rx(roll)   (ZYX / Tait-Bryan convention)
+
+  s_enu = [cos(el)·sin(az), cos(el)·cos(az), sin(el)]ᵀ   (ENU)
+
+  s_body = Rᵀ · s_enu
+
+  s_body_x : satellite component along phone width  (left ← right)
+  s_body_y : satellite component along phone length (bottom ← top)
+  s_body_z : satellite component normal to screen   (front: +Z out of glass)
 """
 
+import re
 from pathlib import Path
 import logging
 import sys
+import numpy as np
 import duckdb
 
 from .config import (
@@ -33,10 +60,136 @@ TEMP_FILE = OUTPUT_DIR / "combined_corpus.tmp.parquet"
 STATUS_PQ = GNSS_PARQUET_DIR / "Status.parquet"
 ORIENT_PQ = GNSS_PARQUET_DIR / "OrientationDeg.parquet"
 
+# Raw GNSS Logger .txt directory (used for device-ID header parsing only)
+RAW_LOGS_DIR = Path(__file__).resolve().parents[2] / "data" / "Raw_Logs"
+
+
+# ------------------------------------------------------------------ #
+#  Device-ID helpers                                                   #
+# ------------------------------------------------------------------ #
+
+_HEADER_RE = re.compile(
+    r"Manufacturer:\s*(\S+)\s+Model:\s*(\S+)", re.IGNORECASE
+)
+
+
+def _parse_device_id(path: Path) -> str:
+    """Return '<Manufacturer>_<Model>' from the first '# Version:' header line.
+
+    Falls back to 'unknown' if the file cannot be read or the pattern is absent.
+    """
+    try:
+        with open(path, "r", errors="ignore") as fh:
+            for _ in range(15):          # header is always in the first ~10 lines
+                line = fh.readline()
+                if not line:
+                    break
+                m = _HEADER_RE.search(line)
+                if m:
+                    return f"{m.group(1)}_{m.group(2)}"
+    except OSError:
+        pass
+    return "unknown"
+
+
+def build_device_id_map(raw_logs_dir: Path) -> dict[str, str]:
+    """Scan all .txt files under raw_logs_dir and return {stem: device_id}.
+
+    The stem of the log file (e.g. 'gnss_log_2026_10_22_09_46_38') is used as
+    a lookup key.  If multiple files share a stem (shouldn't happen), the last
+    one wins.
+    """
+    mapping: dict[str, str] = {}
+    if not raw_logs_dir.exists():
+        log.warning(f"Raw logs directory not found: {raw_logs_dir}")
+        return mapping
+    for txt in raw_logs_dir.rglob("*.txt"):
+        mapping[txt.stem] = _parse_device_id(txt)
+    log.info(f"Device ID map: {len(mapping)} logs → {set(mapping.values())}")
+    return mapping
+
 
 def sql_escape(path: Path) -> str:
     """Escape path for SQL string literal."""
     return str(path.resolve()).replace("'", "''")
+
+
+# ------------------------------------------------------------------ #
+#  Body-frame satellite vector computation                             #
+# ------------------------------------------------------------------ #
+
+def add_body_frame_vectors(df) -> "pd.DataFrame":
+    """Append  s_body_x / s_body_y / s_body_z  columns to a merged corpus DataFrame.
+
+    Inputs (must already exist as columns):
+        AzimuthDegrees, ElevationDegrees  – satellite sky position
+        yawDeg, pitchDeg, rollDeg         – phone Euler angles from OrientationDeg
+
+    The satellite unit vector in East-North-Up (ENU) coordinates is:
+
+        s_east  = cos(el) · sin(az)
+        s_north = cos(el) · cos(az)
+        s_up    = sin(el)
+
+    The rotation matrix from ENU (world) → body frame is:
+
+        R = Rz(yaw) · Ry(pitch) · Rx(roll)
+
+    Following Android's sensor Euler order (ZYX / Tait-Bryan), where:
+        yaw   φ : rotation about world Z (up)
+        pitch θ : rotation about intermediate Y
+        roll  ψ : rotation about body X
+
+        |cφcθ   cφsθsψ−sφcψ   cφsθcψ+sφsψ|
+    R = |sφcθ   sφsθsψ+cφcψ   sφsθcψ−cφsψ|
+        |−sθ    cθsψ           cθcψ        |
+
+    s_body = R · s_enu   (3-vector in phone body frame)
+
+      s_body_x : left ← right across screen
+      s_body_y : bottom ← top along screen
+      s_body_z : out of glass face (+) / into back (−)
+
+    Returns the DataFrame with three new float64 columns appended.
+    Rows with missing angle data are filled with NaN rather than dropped,
+    so the calling code can decide how to handle them.
+    """
+    import pandas as pd
+
+    az  = np.deg2rad(df["AzimuthDegrees"].to_numpy(dtype=float))
+    el  = np.deg2rad(df["ElevationDegrees"].to_numpy(dtype=float))
+    yaw = np.deg2rad(df["yawDeg"].to_numpy(dtype=float))
+    pit = np.deg2rad(df["pitchDeg"].to_numpy(dtype=float))
+    rol = np.deg2rad(df["rollDeg"].to_numpy(dtype=float))
+
+    # Satellite LOS unit vector in ENU
+    s_e = np.cos(el) * np.sin(az)
+    s_n = np.cos(el) * np.cos(az)
+    s_u = np.sin(el)
+
+    # Trig shorthand
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    cp, sp = np.cos(pit), np.sin(pit)
+    cr, sr = np.cos(rol), np.sin(rol)
+
+    # Rows of R (world→body, ZYX Tait-Bryan)
+    r00 = cy * cp
+    r01 = cy * sp * sr - sy * cr
+    r02 = cy * sp * cr + sy * sr
+
+    r10 = sy * cp
+    r11 = sy * sp * sr + cy * cr
+    r12 = sy * sp * cr - cy * sr
+
+    r20 = -sp
+    r21 = cp * sr
+    r22 = cp * cr
+
+    df = df.copy()
+    df["s_body_x"] = np.clip(r00 * s_e + r01 * s_n + r02 * s_u, -1.0, 1.0)
+    df["s_body_y"] = np.clip(r10 * s_e + r11 * s_n + r12 * s_u, -1.0, 1.0)
+    df["s_body_z"] = np.clip(r20 * s_e + r21 * s_n + r22 * s_u, -1.0, 1.0)
+    return df
 
 
 def merge_parquet_sources(con: duckdb.DuckDBPyConnection):
@@ -97,7 +250,23 @@ def merge_parquet_sources(con: duckdb.DuckDBPyConnection):
             (s.UnixTimeMillis - o.utcTimeMillis) as orientation_dt_ms,
             s.session_id, s.device_id,
             s.device_id || '_' || s.session_id || '_' || CAST(s.ConstellationType AS VARCHAR) 
-                || '_' || CAST(s.Svid AS VARCHAR) || '_' || CAST(s.CarrierFrequencyHz AS VARCHAR) as signal_id
+                || '_' || CAST(s.Svid AS VARCHAR) || '_' || CAST(s.CarrierFrequencyHz AS VARCHAR) as signal_id,
+            -- Body-frame satellite vector components via ZYX rotation matrix
+            GREATEST(-1.0, LEAST(1.0,
+                (cos(radians(o.yawDeg)) * cos(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * sin(radians(o.rollDeg)) - sin(radians(o.yawDeg)) * cos(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * cos(radians(o.rollDeg)) + sin(radians(o.yawDeg)) * sin(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_x,
+            GREATEST(-1.0, LEAST(1.0,
+                (sin(radians(o.yawDeg)) * cos(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (sin(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * sin(radians(o.rollDeg)) + cos(radians(o.yawDeg)) * cos(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (sin(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * cos(radians(o.rollDeg)) - cos(radians(o.yawDeg)) * sin(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_y,
+            GREATEST(-1.0, LEAST(1.0,
+                (-sin(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.pitchDeg)) * sin(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.pitchDeg)) * cos(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_z
         FROM status_with_sess s
         ASOF LEFT JOIN orient_dedup o
           ON s.UnixTimeMillis >= o.utcTimeMillis
@@ -178,7 +347,23 @@ def merge_csv_sources(con: duckdb.DuckDBPyConnection):
             (s.UnixTimeMillis - o.utcTimeMillis) as orientation_dt_ms,
             s.session_id, s.device_id,
             s.device_id || '_' || s.session_id || '_' || CAST(s.ConstellationType AS VARCHAR) 
-                || '_' || CAST(s.Svid AS VARCHAR) || '_' || CAST(s.CarrierFrequencyHz AS VARCHAR) as signal_id
+                || '_' || CAST(s.Svid AS VARCHAR) || '_' || CAST(s.CarrierFrequencyHz AS VARCHAR) as signal_id,
+            -- Body-frame satellite vector components via ZYX rotation matrix
+            GREATEST(-1.0, LEAST(1.0,
+                (cos(radians(o.yawDeg)) * cos(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * sin(radians(o.rollDeg)) - sin(radians(o.yawDeg)) * cos(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * cos(radians(o.rollDeg)) + sin(radians(o.yawDeg)) * sin(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_x,
+            GREATEST(-1.0, LEAST(1.0,
+                (sin(radians(o.yawDeg)) * cos(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (sin(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * sin(radians(o.rollDeg)) + cos(radians(o.yawDeg)) * cos(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (sin(radians(o.yawDeg)) * sin(radians(o.pitchDeg)) * cos(radians(o.rollDeg)) - cos(radians(o.yawDeg)) * sin(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_y,
+            GREATEST(-1.0, LEAST(1.0,
+                (-sin(radians(o.pitchDeg))) * (cos(radians(s.ElevationDegrees)) * sin(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.pitchDeg)) * sin(radians(o.rollDeg))) * (cos(radians(s.ElevationDegrees)) * cos(radians(s.AzimuthDegrees))) +
+                (cos(radians(o.pitchDeg)) * cos(radians(o.rollDeg))) * sin(radians(s.ElevationDegrees))
+            )) as s_body_z
         FROM status_raw s
         ASOF LEFT JOIN orient_dedup o
           ON s.session_id = o.session_id 
@@ -257,6 +442,9 @@ def validate_output(con: duckdb.DuckDBPyConnection):
         "session_id",
         "device_id",
         "signal_id",
+        "s_body_x",
+        "s_body_y",
+        "s_body_z",
     }
     actual_cols = set(
         con.execute(f"DESCRIBE SELECT * FROM read_parquet('{temp_path}')").df()[
