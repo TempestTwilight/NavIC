@@ -31,6 +31,7 @@ notebooks/
 # Project-specific data and outputs
 data/
 results/
+*.tar
 
 # Local / temporary files
 test.py
@@ -38,8 +39,3 @@ test.py
 # Project / planning files
 .codegraph/
 .planning/
-
-# AI / agent instruction files
-AGENTS.md
-CLAUDE.md
-INSTRUCTIONS.md

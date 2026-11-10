@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "TempestTwilight", email = "240898001+TempestTwilight@users.noreply.github.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "duckdb>=2.0.0",
     "fastparquet>=2026.5.0",
@@ -33,5 +33,6 @@ dev = [
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "nbconvert>=7.17.1",
+    "pytest>=9.2.0",
     "reportlab>=5.0.1",
 ]
