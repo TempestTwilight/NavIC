@@ -39,3 +39,12 @@ test.py
 # Project / planning files
 .codegraph/
 .planning/
+
+# Gradle internal caches
+android/.gradle/
+
+# Scratch & heavy cache data
+gnss-eda/Stats/scratch/
+
+# Result archives
+*.tar.xz
