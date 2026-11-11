@@ -6,6 +6,7 @@ vectors plus the expected predictions.  This script loads the scikit-learn
 pipelines that produced ModelArtifacts.kt and checks the same vectors, so a
 failure isolates either an export error or a Kotlin arithmetic error.
 """
+
 import json
 import re
 from pathlib import Path
@@ -14,7 +15,9 @@ import joblib
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-TEST_FILE = ROOT / "android/app/src/test/java/org/isro/gnssoptimizer/ModelInferenceTest.kt"
+TEST_FILE = (
+    ROOT / "android/app/src/test/java/org/isro/gnssoptimizer/ModelInferenceTest.kt"
+)
 ARTIFACTS = {
     "temporal": ROOT / "model/temporal_artifacts",
     "orientation": ROOT / "model/orientation_artifacts",
@@ -42,18 +45,30 @@ def main() -> None:
     cases = {
         "temporal": (
             vectors(block(source, "temporalTestInputs")),
-            np.array([float(v) for v in NUMBER.findall(block(source, "temporalExpectedOutputs"))]),
+            np.array(
+                [
+                    float(v)
+                    for v in NUMBER.findall(block(source, "temporalExpectedOutputs"))
+                ]
+            ),
         ),
         "orientation": (
             vectors(block(source, "orientationTestInputs")),
-            np.array([float(v) for v in NUMBER.findall(block(source, "orientationExpectedOutputs"))]),
+            np.array(
+                [
+                    float(v)
+                    for v in NUMBER.findall(block(source, "orientationExpectedOutputs"))
+                ]
+            ),
         ),
     }
 
     for label, (inputs, expected) in cases.items():
         pipeline = joblib.load(MODELS[label])
         features = json.loads((ARTIFACTS[label] / "feature_cols.json").read_text())
-        assert len(features) == pipeline.n_features_in_, f"{label}: feature list mismatch"
+        assert len(features) == pipeline.n_features_in_, (
+            f"{label}: feature list mismatch"
+        )
 
         predictions = np.array([pipeline.predict(x.reshape(1, -1))[0] for x in inputs])
         print(f"{label}: {len(inputs)} vectors, {inputs[0].size} features")

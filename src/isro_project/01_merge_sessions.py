@@ -70,9 +70,7 @@ RAW_LOGS_DIR = Path(__file__).resolve().parents[2] / "data" / "Raw_Logs"
 #  Device-ID helpers                                                   #
 # ------------------------------------------------------------------ #
 
-_HEADER_RE = re.compile(
-    r"Manufacturer:\s*(\S+)\s+Model:\s*(\S+)", re.IGNORECASE
-)
+_HEADER_RE = re.compile(r"Manufacturer:\s*(\S+)\s+Model:\s*(\S+)", re.IGNORECASE)
 
 
 def _parse_device_id(path: Path) -> str:
@@ -82,7 +80,7 @@ def _parse_device_id(path: Path) -> str:
     """
     try:
         with open(path, "r", errors="ignore") as fh:
-            for _ in range(15):          # header is always in the first ~10 lines
+            for _ in range(15):  # header is always in the first ~10 lines
                 line = fh.readline()
                 if not line:
                     break
@@ -140,7 +138,7 @@ def build_device_time_intervals(raw_logs_dir: Path) -> pd.DataFrame:
                                 min_t = t
                             if max_t is None or t > max_t:
                                 max_t = t
-                        except (ValueError, IndexError):
+                        except ValueError, IndexError:
                             pass
         except OSError:
             continue
@@ -154,11 +152,15 @@ def build_device_time_intervals(raw_logs_dir: Path) -> pd.DataFrame:
             f"{df['device_id'].nunique()} devices"
         )
     else:
-        log.warning("No device time intervals found — device_id will default to 'unknown'")
+        log.warning(
+            "No device time intervals found — device_id will default to 'unknown'"
+        )
     return df
 
 
-def register_device_intervals(con: duckdb.DuckDBPyConnection, raw_logs_dir: Path) -> None:
+def register_device_intervals(
+    con: duckdb.DuckDBPyConnection, raw_logs_dir: Path
+) -> None:
     """Build and register the device_intervals table in DuckDB.
 
     Creates a DuckDB table `device_intervals(device_id, min_time, max_time)` so
@@ -181,6 +183,7 @@ def sql_escape(path: Path) -> str:
 # ------------------------------------------------------------------ #
 #  Body-frame satellite vector computation                             #
 # ------------------------------------------------------------------ #
+
 
 def add_body_frame_vectors(df) -> "pd.DataFrame":
     """Append  s_body_x / s_body_y / s_body_z  columns to a merged corpus DataFrame.
@@ -218,10 +221,9 @@ def add_body_frame_vectors(df) -> "pd.DataFrame":
     Rows with missing angle data are filled with NaN rather than dropped,
     so the calling code can decide how to handle them.
     """
-    import pandas as pd
 
-    az  = np.deg2rad(df["AzimuthDegrees"].to_numpy(dtype=float))
-    el  = np.deg2rad(df["ElevationDegrees"].to_numpy(dtype=float))
+    az = np.deg2rad(df["AzimuthDegrees"].to_numpy(dtype=float))
+    el = np.deg2rad(df["ElevationDegrees"].to_numpy(dtype=float))
     yaw = np.deg2rad(df["yawDeg"].to_numpy(dtype=float))
     pit = np.deg2rad(df["pitchDeg"].to_numpy(dtype=float))
     rol = np.deg2rad(df["rollDeg"].to_numpy(dtype=float))

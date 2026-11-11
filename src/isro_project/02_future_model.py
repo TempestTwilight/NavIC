@@ -251,7 +251,9 @@ df = df.dropna(subset=["UnixTimeMillis"]).copy()
 # every downstream temporal-feature step is safe.
 before = len(df)
 df = df.dropna(subset=SIGNAL_KEYS).copy()
-print(f"Dropped {before - len(df):,} rows with missing signal-id fields ({time.time() - t0:.2f}s)")
+print(
+    f"Dropped {before - len(df):,} rows with missing signal-id fields ({time.time() - t0:.2f}s)"
+)
 
 
 # ============================================================
@@ -333,7 +335,7 @@ print(f"Derivatives built in {time.time() - t0:.2f}s")
 # ============================================================
 
 t0 = time.time()
-print(f"\n--- Constructing t -> t+{HORIZON_MS/1000:g}s target ---")
+print(f"\n--- Constructing t -> t+{HORIZON_MS / 1000:g}s target ---")
 
 target_left = df[SIGNAL_KEYS + ["UnixTimeMillis"]].copy()
 target_left["_orig_index"] = df.index.values
@@ -438,7 +440,9 @@ print(f"Dropped: {len(df) - len(complete):,}")
 X = complete[feature_cols].astype(np.float32)
 y = complete["target_cn0"].astype(np.float32)
 
-print(f"\nFinal feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 1e6:.1f} MB")
+print(
+    f"\nFinal feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 1e6:.1f} MB"
+)
 
 
 # ============================================================
@@ -446,7 +450,9 @@ print(f"\nFinal feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 
 # ============================================================
 
 # Calendar day grouping (prevents sky geometry leakage from same-day sessions)
-complete["recording_day"] = pd.to_datetime(complete["UnixTimeMillis"], unit="ms").dt.date.astype(str)
+complete["recording_day"] = pd.to_datetime(
+    complete["UnixTimeMillis"], unit="ms"
+).dt.date.astype(str)
 
 if (
     complete["device_id"].nunique() > 1
@@ -534,7 +540,9 @@ if args.skip_rf:
     print("\n[INFO] Skipping tree models (--skip-rf enabled). Ridge-only execution.")
 else:
     print("\n" + "=" * 75)
-    model_name = "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    model_name = (
+        "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    )
     print(f" {model_name}")
     print("=" * 75)
 
@@ -798,9 +806,7 @@ for fold, (train_idx, test_idx) in enumerate(cv.split(X, y, groups), start=1):
             "persistence_top1": int(
                 signal_tuple(g.loc[persistence_idx]) == actual_signal_tuple
             ),
-            "ridge_top1": int(
-                signal_tuple(g.loc[ridge_idx]) == actual_signal_tuple
-            ),
+            "ridge_top1": int(signal_tuple(g.loc[ridge_idx]) == actual_signal_tuple),
             "persistence_top3": int(actual_signal_tuple in persistence_top3),
             "ridge_top3": int(actual_signal_tuple in ridge_top3),
         }

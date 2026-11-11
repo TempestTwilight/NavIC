@@ -384,7 +384,9 @@ print(f"Feature matrix shape: {X.shape}, RAM: {X.memory_usage().sum() / 1e6:.1f}
 # ============================================================
 
 # Calendar day grouping (prevents sky geometry leakage from same-day sessions)
-df["recording_day"] = pd.to_datetime(df["UnixTimeMillis"], unit="ms").dt.date.astype(str)
+df["recording_day"] = pd.to_datetime(df["UnixTimeMillis"], unit="ms").dt.date.astype(
+    str
+)
 
 if (
     df["device_id"].nunique() > 1
@@ -465,7 +467,9 @@ if args.skip_rf:
     print("\n[INFO] Skipping tree models (--skip-rf enabled). Ridge-only execution.")
 else:
     print("\n" + "=" * 75)
-    model_name = "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    model_name = (
+        "HistGradientBoosting (Fast Trees)" if args.fast_rf else "Random Forest"
+    )
     print(f" {model_name}")
     print("=" * 75)
 
