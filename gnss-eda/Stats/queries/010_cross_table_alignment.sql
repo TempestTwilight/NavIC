@@ -1,0 +1,16 @@
+-- 010 — Phase E cross-table alignment tests [OBSERVED 2026-11-11]
+-- (a) Exact-timestamp match Raw↔Status: only 4,948 of 87,512 Raw epochs (5.7%)
+--     share the identical (session, ms) key — the GnssMeasurementsEvent and
+--     GnssStatusEvent are stamped independently → exact joins fail.
+-- (b) Nearest-time alignment Raw→Status (ASOF both directions, min |Δ|):
+--     median |Δ| = 3 ms; 68,190 (77.9%) ≤ 50 ms; 87,498 (99.98%) ≤ 1 s; max 5.0 s.
+-- (c) Nearest-time Raw→OrientationDeg (utcTimeMillis): median |Δ| = 2 ms;
+--     77,257 (88.3%) ≤ 50 ms; max 676 ms (only 19 epochs > 250 ms).
+-- (d) Nearest-time Raw→GPS-provider Fix (UnixTimeMillis): 100% ≤ 1 s (median 3 ms,
+--     max 1.0 s); fix rate ~2.7 Hz.
+-- (e) OrientationDeg↔GameRotationVector: 11,549,877 of 11,550,170 rows share the
+--     exact (session, elapsedRealtimeNanos) stamp (99.997%) → both sensor streams
+--     are emitted on the same sensor events; one orientation timeline serves both.
+-- CONCLUSION: alignment strategy = nearest-time (as-of) join on wall-clock within
+--   a tolerance of ±50–100 ms (sensors/Status) and ±1 s (Fix); exact-key joins are
+--   invalid. For label horizon 15 s, the 15 s shift is on the Raw epoch axis.

@@ -1,0 +1,579 @@
+# Hand-authored per-column definitions for the 11 non-Raw record types.
+# Input for the 02_table_<Type>.md renderer; observed numbers are injected from
+# scratch/profiles/<Type>.json at render time (defs never hard-code numbers).
+# Each entry: what / why / use (incl. project relevance: real-time availability,
+# leakage risk) / caveats / status.
+
+# ---------------------------------------------------------------- Status -----
+STATUS_DEFS = {
+"UnixTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms) of this Status record, as the app stamped it. Observed to be EMPTY on many early rows (e.g. the first rows of 0_down_facing.txt had it blank).",
+ why="Anchors each satellite-status row to calendar time so it can be joined to Raw/Fix/sensors.",
+ use="Join key to other tables (together with Svid/ConstellationType/SignalIndex). Project: time-of-day/session features are legitimate; beware that blank timestamps must be filled from the same-file neighbours before joining.",
+ caveats="Blank on some rows (structural: the logger leaves it empty when the event shares the previous timestamp); NOT row-unique; cross-device collisions expected.",
+ status="OBSERVED IN DATA (blank rows) + BACKGROUND (semantics)"),
+"SignalCount": dict(
+ what="Number of GNSS signals the receiver was tracking at that event (count of Status rows in the same batch).",
+ why="Global measure of tracking load — a proxy for sky visibility and receiver capability.",
+ use="Epoch-level feature, available in real time. Project: directly relevant — C/N0 depends on how many signals are tracked (front-end channel sharing / scheduling).",
+ caveats="Reference doc says 'typical 20-70'; observed medians are far higher (89) on multi-constellation phones — verify and re-baseline. Must equal per-batch row count — check in Phase D.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"SignalIndex": dict(
+ what="0-based index of this signal within the batch (0 .. SignalCount-1).",
+ why="Disambiguates rows of one batch; with batch timestamp it forms a row key.",
+ use="Row key component; sanity check that indices are dense/unique per batch.",
+ caveats="Carries no signal meaning by itself — never use as a numeric feature.",
+ status="OBSERVED IN DATA (0-104) + BACKGROUND"),
+"ConstellationType": dict(
+ what="GNSS constellation code (1 GPS, 2 SBAS, 3 GLONASS, 4 QZSS, 5 BeiDou, 6 Galileo, 7 NavIC/IRNSS).",
+ why="Identifies which system the satellite belongs to.",
+ use="Categorical feature + grouping key. Project: C/N0 behaviour differs per constellation (different modulation/bands), so this is a key grouping variable.",
+ caveats="Same numeric value as in Raw — verify identical value sets across tables.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"Svid": dict(
+ what="Satellite ID within the constellation (see Raw.Svid).",
+ why="Identifies the satellite.",
+ use="Track persistence / grouping. Project: categorical feature; available at prediction time.",
+ caveats="Only unique together with ConstellationType.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"CarrierFrequencyHz": dict(
+ what="Carrier frequency of the signal in Hz (e.g. GPS L1 1,575,420,000).",
+ why="Identifies the band (L1/L5/B1/E1…) within a constellation.",
+ use="Signal identity key; categorical band feature. Project: band is a strong C/N0 predictor (L5 usually better than L1).",
+ caveats="GLONASS frequencies vary per channel; treat as categorical, not continuous.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"Cn0DbHz": dict(
+ what="Carrier-to-noise density of the received signal (dB-Hz), the primary signal-strength measure.",
+ why="THE measurement of signal quality; the prediction target of the project.",
+ use="Project: this is the Status-side copy of the C/N0 that Raw also reports — use for cross-checks and for building the target at 1 Hz.",
+ caveats="0 values observed (18.2% of rows) — likely 'not reported' rather than real 0; must be handled as missing, not as a number. Doc range 0-63, typical 10-50.",
+ status="OBSERVED IN DATA (incl. zeros) + REFERENCE (range)"),
+"AzimuthDegrees": dict(
+ what="Satellite azimuth: horizontal direction from the phone to the satellite, degrees clockwise from true north (0-360).",
+ why="Geometry of the satellite relative to the sky.",
+ use="Sky-plot analyses; features (azimuth relative to phone yaw for orientation effects). Project: available at prediction time.",
+ caveats="Undefined when the satellite is not in view (check nulls).",
+ status="OBSERVED IN DATA (0-359.98) + BACKGROUND"),
+"ElevationDegrees": dict(
+ what="Satellite elevation above the local horizon in degrees (0 = horizon, 90 = zenith).",
+ why="Main geometric driver of C/N0: lower elevation → longer atmospheric/obstruction path.",
+ use="Feature + binning variable for Phase F elevation analysis.",
+ caveats="Observed min is −5.0 (below horizon) — the chipset can report slightly negative values when the satellite is below the horizon but still tracked; do not blindly clip.",
+ status="OBSERVED IN DATA (min −5) + BACKGROUND"),
+"UsedInFix": dict(
+ what="Boolean: whether this satellite was used in the most recent position fix.",
+ why="Marks the subset of satellites the chipset trusted for positioning.",
+ use="Analysis variable (survivorship); could be a weak feature. Project: available at prediction time only if the last fix is known — treat carefully.",
+ caveats="Only meaningful at fix epochs; between fixes it is stale. Reference doc claims ~36% true — verify.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"HasAlmanacData": dict(
+ what="Boolean: receiver has the satellite's almanac (coarse orbit info).",
+ why="Indicates how much the receiver knows about the satellite.",
+ use="Data-quality descriptor; weak feature.",
+ caveats="74% false observed — mostly the almanac is not broadcast/kept.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"HasEphemerisData": dict(
+ what="Boolean: receiver has the satellite's ephemeris (precise orbit) — required to use the satellite in the position solution.",
+ why="Explains why some strong signals are not UsedInFix.",
+ use="Feature / analysis variable. Project: available in real time; correlates with tracking age.",
+ caveats="58% false observed; ephemeris validity has a ~2-4 h lifetime — expect time structure within a session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"BasebandCn0DbHz": dict(
+ what="C/N0 measured in the baseband (post-correlation), typically a few dB below Raw.Cn0DbHz (antenna port).",
+ why="Second, independent signal-quality estimate from inside the chipset.",
+ use="Cross-check of Raw Cn0; possibly a cleaner target or feature. Project: real-time available.",
+ caveats="Zeros count exactly equals Cn0DbHz zeros in first pass — the two columns share a reporting gap; verify missingness overlap.",
+ status="OBSERVED IN DATA + REFERENCE (typical offset)"),
+}
+
+# ------------------------------------------------------------------ Fix ------
+FIX_DEFS = {
+"Provider": dict(
+ what="Which location provider produced the fix: 'FLP' (Fused Location Provider), 'GPS' (GNSS engine), 'NLP' (Network Location Provider).",
+ why="A fix's origin determines its nature — GPS fixes are satellite-derived, NLP fixes can be WiFi/cell-tower derived.",
+ use="Grouping/filtering variable. Project: CRITICAL — only GPS-provider fixes are true GNSS fixes; NLP rows can leak non-GNSS information (WiFi databases) and must be excluded from GNSS analyses. Counts observed: FLP 93,229 / GPS 86,539 / NLP 8,311.",
+ caveats="FLP fuses sensors+GNSS+network; its coordinates are smoothed, not raw GNSS.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"LatitudeDegrees": dict(
+ what="Fix latitude in degrees (WGS-84).",
+ why="Position of the phone.",
+ use="Geographic context; session-site identification. Project: all values concentrate around 18.4603 N / 73.8837 E (Pune campus) — no wide variation, so lat/lon are near-constant features.",
+ caveats="FLP/NLP smoothing makes jitter understated; compare providers before trusting accuracy.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"LongitudeDegrees": dict(
+ what="Fix longitude in degrees (WGS-84).",
+ why="Position of the phone.",
+ use="Same as LatitudeDegrees.",
+ caveats="Same as LatitudeDegrees.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"AltitudeMeters": dict(
+ what="Fix altitude in metres (WGS-84 ellipsoidal height, as reported by Android's Location.getAltitude()).",
+ why="Height component of the fix.",
+ use="Site context. Project: observed 569-632 m around Pune — variation is mostly noise, not real movement.",
+ caveats="Vertical error is usually 2-3× horizontal; NLP altitudes are coarse.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"SpeedMps": dict(
+ what="Horizontal speed from the fix (m/s).",
+ why="Motion state of the phone.",
+ use="Feature (walking vs static changes multipath dynamics). Project: available at prediction time; observed max 3.75 m/s — pedestrian speeds only.",
+ caveats="0 may mean 'static' or 'not computed'; check provider differences.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"AccuracyMeters": dict(
+ what="68% horizontal accuracy radius of the fix (metres).",
+ why="Standard Android quality metric of the fix.",
+ use="Quality filter / feature. Project: a per-epoch GNSS-quality signal available in real time — useful context for C/N0.",
+ caveats="Provider-dependent meaning; NLP accuracy is network-quality, not GNSS.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"BearingDegrees": dict(
+ what="Direction of travel of the device in degrees east of true north (0-360).",
+ why="Motion direction.",
+ use="Only meaningful while moving. Project: null when static (71.8% null observed); do not impute blindly.",
+ caveats="71.8% null confirms the doc claim; mostly-static sessions explain it.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"UnixTimeMillis": dict(
+ what="UTC timestamp of the fix (ms).",
+ why="Time axis of the fix stream.",
+ use="As-of joins of fixes to Raw/sensor epochs; train/test split boundaries.",
+ caveats="Fixes are irregular (~2.7 Hz across providers); never assume regular spacing.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"SpeedAccuracyMps": dict(
+ what="1-sigma accuracy of SpeedMps (m/s).",
+ why="Quality of the speed estimate.",
+ use="Weight/filter for speed features.",
+ caveats="Reference doc claims 100% null — CONFIRMED in the profile; column is dead weight.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"BearingAccuracyDegrees": dict(
+ what="1-sigma accuracy of BearingDegrees (degrees).",
+ why="Quality of the bearing estimate.",
+ use="Weight/filter for bearing features.",
+ caveats="Expected mostly null when bearing is null; verify in profile.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Time since boot of the fix (ns) — the monotonic clock of Android.",
+ why="The stable clock for cross-table alignment (wall clock can jump).",
+ use="THE join/alignment clock to Raw and sensors (which also stamp elapsedRealtimeNanos). Project: use for all as-of joins; also fixes the 'which came first' ordering.",
+ caveats="Not comparable across devices (reboots reset it); always pair with session id.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"VerticalAccuracyMeters": dict(
+ what="1-sigma vertical accuracy of the altitude (metres).",
+ why="Quality of the height estimate.",
+ use="Quality filter.",
+ caveats="Null when the provider does not compute it; check null rate.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"MockLocation": dict(
+ what="Boolean: whether this fix came from a mock-location app.",
+ why="Data-integrity flag — mock fixes would poison the analysis.",
+ use="Sanity check. Project: expected constant 0 everywhere (no mock apps used); if truly constant it is dead weight but its constancy is itself a finding.",
+ caveats="Constant 0 observed.",
+ status="OBSERVED IN DATA (constant 0) + BACKGROUND"),
+"NumberOfUsedSignals": dict(
+ what="Number of GNSS signals used in the fix (Android 12+ field).",
+ why="Would link the fix to the Status rows flagged UsedInFix.",
+ use="Cross-check UsedInFix counts. Project: potential epoch feature IF populated.",
+ caveats="Reference doc claims 100% null — CONFIRMED; column is dead weight.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"VerticalSpeedAccuracyMps": dict(
+ what="1-sigma accuracy of vertical speed (m/s).",
+ why="Quality of the vertical speed estimate.",
+ use="Dead weight if null.",
+ caveats="Reference doc claims 100% null — CONFIRMED.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"SolutionType": dict(
+ what="Code describing the fix computation method (e.g. PPP-related solution classes on some chipsets).",
+ why="Would describe the quality class of the solution.",
+ use="Potentially useful categorical if ever populated.",
+ caveats="Reference doc claims 100% null — CONFIRMED.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"ExtraKeyValuePairs": dict(
+ what="Pipe-separated key=value pairs with provider-specific extras (e.g. 'maxCn0=41|meanCn0=28|satellites=37').",
+ why="Carries chipset-specific summary values not in the schema.",
+ use="Parsing candidates: maxCn0/meanCn0 are useful epoch-level C/N0 summaries. Project: meanCn0 is a per-epoch aggregate of the target itself — usable as a context feature at prediction time, but never use FUTURE values (leakage).",
+ caveats="54.4% null observed (mostly when the provider has no extras); the key set may differ per provider — parse defensively.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+}
+
+# ------------------------------------------------------------------ Agc ------
+AGC_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms) of this clock/AGC event.",
+ why="Calendar-time anchor of the block.",
+ use="Joining to Raw epochs by nearest time; session metadata.",
+ caveats="3.5% null observed — fill forward within the file before joining.",
+ status="OBSERVED IN DATA (3.5% null) + BACKGROUND"),
+"TimeNanos": dict(
+ what="Receiver hardware clock value (ns) at the event — same semantics as Raw.TimeNanos.",
+ why="The block is a 1 Hz copy of the epoch clock block, one row per constellation/band.",
+ use="Alignment with Raw epochs (Raw rows carry the same fields per epoch).",
+ caveats="Constant within one event row; huge values (int64!) like Raw.FullBiasNanos.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"LeapSecond": dict(
+ what="GPS−UTC leap seconds as reported by the chipset (18 normally; 19 seen in ONE session — anomalous, Q-008).",
+ why="Time conversion; also a fingerprint of chipset firmware behaviour.",
+ use="Sanity check; drop as a feature (constant).",
+ caveats="One session reports 19 — a firmware/reporting quirk worth documenting, not a real leap-second change.",
+ status="OBSERVED (19 in one session) + BACKGROUND"),
+"TimeUncertaintyNanos": dict(
+ what="1-sigma uncertainty of TimeNanos (ns).",
+ why="Clock quality.",
+ use="Quality filter.",
+ caveats="Reference doc claims 100% null here — CONFIRMED.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"FullBiasNanos": dict(
+ what="Hardware-clock-to-GPS-time offset (ns) — same as Raw.FullBiasNanos.",
+ why="Clock state per 1 Hz event.",
+ use="Clock-stability analysis (Phase F) as a quality/behaviour study of the receiver.",
+ caveats="int64; can jump at discontinuities (see next column).",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"BiasNanos": dict(
+ what="Sub-ns correction to FullBiasNanos.",
+ why="Clock precision.",
+ use="Positioning math only.",
+ caveats="Marginal for the project.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"BiasUncertaintyNanos": dict(
+ what="1-sigma uncertainty of the clock bias (ns).",
+ why="Clock quality.",
+ use="Quality filter.",
+ caveats="Check equality with TimeUncertaintyNanos as seen in Raw samples.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"DriftNanosPerSecond": dict(
+ what="Clock drift rate (ns/s).",
+ why="Clock frequency error.",
+ use="Clock analysis.",
+ caveats="Reference doc claims 100% null here — CONFIRMED.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"DriftUncertaintyNanosPerSecond": dict(
+ what="1-sigma uncertainty of drift (ns/s).",
+ why="Drift quality.",
+ use="Dead weight if null.",
+ caveats="Reference doc claims 100% null here — CONFIRMED.",
+ status="OBSERVED (100% null) + REFERENCE"),
+"HardwareClockDiscontinuityCount": dict(
+ what="Counter of hardware-clock resets; increments at each discontinuity.",
+ why="Segments the clock history.",
+ use="Detecting clock jumps within sessions.",
+ caveats="Constant 0 observed — the clock never reset during Samsung sessions.",
+ status="OBSERVED (constant 0) + BACKGROUND"),
+"AgcDb": dict(
+ what="Automatic Gain Control level in dB — the front-end gain the chipset applies to the incoming signal.",
+ why="THE block's namesake. AGC level indirectly measures the total in-band RF power: strong environment (many strong satellites + interference) → lower gain.",
+ use="Project: AGC is a known GNSS-quality proxy (e.g. interference/jamming detection literature). As an epoch-level real-time feature it can help C/N0 prediction; only 4 distinct values observed (heavily quantised firmware output) — treat as categorical, Q-005.",
+ caveats="Only present in 29 sessions (Samsung device) — cross-device analyses cannot use it; check whether the value set differs by band (CarrierFrequencyHz column exists here).",
+ status="OBSERVED (4 distinct values) + BACKGROUND (semantics)"),
+"CarrierFrequencyHz": dict(
+ what="Carrier frequency (Hz) of the AGC measurement — the block is per band, not per satellite.",
+ why="Ties the AGC value to a band (L1/L5...).",
+ use="Per-band AGC feature. Project: real-time available (on the Samsung device).",
+ caveats="171,223 zero values observed — zeros are 'not reported'; treat as missing.",
+ status="OBSERVED (zeros present) + BACKGROUND"),
+"ConstellationType": dict(
+ what="Constellation code (1 GPS, 2 SBAS, ...) of the AGC row.",
+ why="Per-constellation AGC reporting.",
+ use="Grouping for AGC analysis.",
+ caveats="Verify value set vs Raw/Status.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+}
+
+# ------------------------------------------------------------------ Nav ------
+NAV_DEFS = {
+"Svid": dict(
+ what="Satellite ID the navigation-message bytes belong to.",
+ why="Ties each nav chunk to a satellite.",
+ use="Grouping; building per-satellite nav timelines.",
+ caveats="Meaningful only with ConstellationType — which this record type does NOT declare; infer from the accompanying Raw/Status rows by time.",
+ status="OBSERVED IN DATA + BACKGROUND (inference needed)"),
+"Type": dict(
+ what="Nav-message source type code (e.g. 257 = GNSS nav message, 769 = …; an Android GnssNavigationMessage enum).",
+ why="Tells which message stream the bytes come from.",
+ use="Grouping by message family.",
+ caveats="5 distinct values observed; decode against the Android API documentation in Phase C (REFERENCE).",
+ status="OBSERVED (5 values) + REFERENCE (decode pending)"),
+"Status": dict(
+ what="Parity/health status of the received nav-message data (Android: STATUS_UNKNOWN=0, STATUS_PARITY_PASSED=1<<0, STATUS_PARITY_REBUILT=1<<1, STATUS_CONTENT_UNKNOWN...).",
+ why="Only parity-passed data is usable.",
+ use="Filter for nav analyses.",
+ caveats="Constant 1 observed (parity passed) — good; constant → dead weight as a feature.",
+ status="OBSERVED (constant 1) + REFERENCE (decode)"),
+"MessageId": dict(
+ what="Message identifier within the stream (e.g. subframe/page id); −1 when unknown.",
+ why="Sequences the message chunks.",
+ use="Reconstructing full messages.",
+ caveats="−1 observed on some rows (unknown); ranges −1..127.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"SubMessageId": dict(
+ what="Sub-message identifier (page/word) within the message; −1 when unknown.",
+ why="Finer sequencing of chunks.",
+ use="Same as MessageId.",
+ caveats="−1 when unknown.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"nDataBytes": dict(
+ what="Number of bytes in the payload (typed-cache column replacing a duplicate declared field; values 11/…/40; also −5 artifacts from arity quirks).",
+ why="Sanity-checks the payload length.",
+ use="Filtering malformed nav rows.",
+ caveats="min −5 observed — negative lengths are arity anomalies; 8,595 rows with empty payload.",
+ status="OBSERVED (−5 anomalies) + BACKGROUND"),
+"DataBytes": dict(
+ what="The raw navigation-message payload as a comma-separated byte array (variable arity! 6th field onward).",
+ why="The actual bits of the nav message (ephemerides, clock, ionosphere model...).",
+ use="Out of scope for C/N0 prediction; kept for completeness of column documentation.",
+ caveats="Variable arity breaks naive CSV parsing; 8,595 rows with empty payload and nDataBytes = −5 anomalies observed (arity quirks).",
+ status="OBSERVED IN DATA (arity anomalies) + BACKGROUND"),
+}
+
+# ------------------------------------------------------- OrientationDeg ------
+ORIENTATION_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms) of the orientation sample.",
+ why="Calendar-time anchor.",
+ use="Joins to fix/GNSS epochs by nearest time.",
+ caveats="Wall clock — verify monotonicity; prefer elapsedRealtimeNanos for ordering.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns) of the orientation sample.",
+ why="Stable clock for alignment with Raw/Status/Fix.",
+ use="THE alignment clock for Phase G (orientation at epoch time).",
+ caveats="Per-device only; always pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"yawDeg": dict(
+ what="Yaw (azimuth) angle of the phone in degrees: rotation about the vertical axis; 0 = magnetic/east-of-north convention per the TYPE_ROTATION_VECTOR→getOrientation mapping.",
+ why="First angle in the record; THE candidate output of the project (recommend a yaw).",
+ use="Phase G: map yaw to the orientation grid (face_up/back, N/E/S/W, landscape) and study C/N0 vs yaw.",
+ caveats="Observed range 0-359 integer-like (quantised to 1°); convention must be verified against GameRotationVector quaternions (Q-006/G); magnetic vs true north distinction depends on declination (~0.5° in Pune — negligible).",
+ status="OBSERVED (0-359, integer-like) + BACKGROUND (convention)"),
+"rollDeg": dict(
+ what="Roll angle in degrees (rotation about the phone's long axis). SECOND angle in this record per the logger header.",
+ why="Distinguishes phone tilt.",
+ use="Orientation-grid construction (flat vs vertical).",
+ caveats="Observed −179..179; the header order (yaw,roll,pitch) CONTRADICTS docs/Data_Obs.md (yaw,pitch,roll) — the pitch/roll ranges settle it: values like ±97 are impossible for pitch on a phone (−90..90) but fine for roll, so header order is right and the doc is wrong (Q-006).",
+ status="OBSERVED (range proves order) + REFERENCE (doc CONTRADICTED)"),
+"pitchDeg": dict(
+ what="Pitch angle in degrees (rotation about the phone's short axis; −90 = camera down... per Android convention). THIRD angle in this record.",
+ why="Completes the Euler triple.",
+ use="Orientation-grid construction.",
+ caveats="Observed −89..89 — consistent with pitch; see rollDeg note.",
+ status="OBSERVED (−89..89) + BACKGROUND"),
+"CalibrationAccuracy": dict(
+ what="Sensor-manager confidence code: 0 UNRELIABLE, 1 LOW, 2 MEDIUM, 3 HIGH.",
+ why="Tells how much to trust the orientation values.",
+ use="Quality filter for orientation features.",
+ caveats="Constant 3 observed — always 'high'; dead weight as a feature but confirms the vendor fusion was confident.",
+ status="OBSERVED (constant 3) + REFERENCE (code meaning)"),
+}
+
+# ------------------------------------------------ GameRotationVector --------
+GRV_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms) of the quaternion sample.",
+ why="Calendar-time anchor.",
+ use="Joins by nearest time.",
+ caveats="Same as other sensor rows.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns).",
+ why="Stable alignment clock.",
+ use="As-of joins; ~125 Hz sampling makes it possible to interpolate orientation to any GNSS epoch.",
+ caveats="Pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"x": dict(
+ what="Quaternion component x (rotation vector axis · sin(θ/2)).",
+ why="With y,z,w encodes the device orientation relative to Earth as a quaternion (game rotation vector = gyro+accel ONLY, no magnetometer → yaw drifts relative to true north).",
+ use="Phase G: convert to Euler angles and compare with OrientationDeg; derive the orientation grid without Euler singularity issues.",
+ caveats="Non-normalised per-row? Verify norm ≈ 1; values are relative to a gravity-based frame — yaw is NOT absolute north.",
+ status="OBSERVED IN DATA + BACKGROUND (semantics)"),
+"y": dict(
+ what="Quaternion component y.",
+ why="Same as x.",
+ use="Same as x.",
+ caveats="Same as x.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"z": dict(
+ what="Quaternion component z.",
+ why="Same as x.",
+ use="Same as x.",
+ caveats="Same as x.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"w": dict(
+ what="Quaternion scalar component w = cos(θ/2).",
+ why="Completes the quaternion; Android reports it LAST (x,y,z,w order in the header).",
+ use="Same as x; also canonical-sign check: Android rotation vectors keep w ≥ 0 (observed — unlike FOP where w goes negative).",
+ caveats="Order in the LOGGER HEADER is x,y,z,w — the reference doc's listing must be checked against this.",
+ status="OBSERVED (w ≥ 0 always) + BACKGROUND"),
+}
+
+# ------------------------------------------------------------------ FOP ------
+FOP_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms).",
+ why="Calendar anchor.",
+ use="Joins.",
+ caveats="Standard.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns).",
+ why="Alignment clock.",
+ use="As-of joins at ~125 Hz.",
+ caveats="Pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"x": dict(
+ what="Quaternion component x of the FUSED orientation provider (accel+gyro+mag → absolute-ish heading).",
+ why="Full quaternion of the fused sensor.",
+ use="Phase G comparison: FOP vs GameRotationVector vs OrientationDeg.",
+ caveats="w is NOT canonicalised here (14% of rows negative) — normalise sign before comparing quaternions.",
+ status="OBSERVED (w negative 14%) + BACKGROUND"),
+"y": dict(
+ what="Quaternion component y.",
+ why="Same as x.",
+ use="Same.",
+ caveats="Same.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"z": dict(
+ what="Quaternion component z.",
+ why="Same.",
+ use="Same.",
+ caveats="Same.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"w": dict(
+ what="Quaternion scalar w.",
+ why="Completes quaternion.",
+ use="Sign canonicalisation needed (see x).",
+ caveats="Negative in 14% of rows — q and −q are the same rotation; must be canonicalised before element-wise comparisons.",
+ status="OBSERVED (14% negative) + BACKGROUND"),
+"headingDegrees": dict(
+ what="Fused heading in degrees (0-360) — the magnetic-azimuth of the device from the fusion (TYPE_GAME_ROTATION_VECTOR + geomagnetic correction).",
+ why="The absolute-yaw equivalent of the fused provider.",
+ use="Project: candidate 'recommended yaw' variable; compare against OrientationDeg.yawDeg for consistency.",
+ caveats="0-360 wraparound at 0/360; missing when magnetometer is unreliable (FOP absent in the June orientation files!).",
+ status="OBSERVED (0-360) + BACKGROUND"),
+"headingErrorDegrees": dict(
+ what="Estimated error of headingDegrees in degrees.",
+ why="Quality of the heading.",
+ use="Weight/filter; quantised (304 distinct values, min 20.9°) — treat as categorical-ish.",
+ caveats="Large minimum error (~21°) suggests coarse quantisation; not a smooth quality signal.",
+ status="OBSERVED (quantised, min 20.9°) + BACKGROUND"),
+"conservativeHeadingErrorDegrees": dict(
+ what="A deliberately pessimistic version of headingErrorDegrees (vendor-defined).",
+ why="Safety margin for consumers of the heading.",
+ use="Alternative quality bound; same usage as headingErrorDegrees.",
+ caveats="Vendor-defined semantics — do not interpret precisely; compare with headingErrorDegrees (should be ≥).",
+ status="OBSERVED IN DATA + BACKGROUND (semantics)"),
+}
+
+# ---------------------------------------------------------------- Accel ------
+ACCEL_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms).", why="Calendar anchor.",
+ use="Joins.", caveats="Standard.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns) at ~200 Hz sampling.",
+ why="Alignment clock.",
+ use="Gravity check (Phase G): mean |z| ≈ 9.8 when phone flat proves the axis convention.",
+ caveats="Pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"AccelXMps2": dict(
+ what="Calibrated accelerometer X (m/s²), device frame (screen-up convention: +z out of the screen).",
+ why="Linear acceleration including gravity.",
+ use="Feature: motion state (static → gravity only); Phase G gravity check.",
+ caveats="Includes gravity — subtract 9.81 norm for linear motion; 29 sessions only (Samsung), so cross-device coverage is partial.",
+ status="OBSERVED (29 sessions) + BACKGROUND"),
+"AccelYMps2": dict(
+ what="Calibrated accelerometer Y (m/s²).",
+ why="Same.",
+ use="Same.",
+ caveats="Same; median 6.35 observed → phone was tilted, not flat, in the Samsung sessions.",
+ status="OBSERVED (median 6.35) + BACKGROUND"),
+"AccelZMps2": dict(
+ what="Calibrated accelerometer Z (m/s²).",
+ why="Same.",
+ use="Same.",
+ caveats="Same.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"CalibrationAccuracy": dict(
+ what="Sensor confidence code 0-3.",
+ why="Trust level of calibration.",
+ use="Filter.",
+ caveats="Check constancy.",
+ status="OBSERVED IN DATA + REFERENCE (code meaning)"),
+}
+
+# ------------------------------------------------------------- UncalAccel ----
+UNCAL_ACCEL_DEFS = {
+"utcTimeMillis": dict(
+ what="UTC wall-clock timestamp (ms).", why="Calendar anchor.",
+ use="Joins.", caveats="Standard.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns).",
+ why="Alignment clock.",
+ use="Joins; 60 sessions present.",
+ caveats="Pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"UncalAccelXMps2": dict(
+ what="Uncalibrated accelerometer X: raw sensor output WITHOUT the vendor bias removed (m/s²).",
+ why="Raw dunder signal — bias columns let you reproduce the calibrated value yourself.",
+ use="Redundant with Accel for the project; document as fallback.",
+ caveats="Bias* columns are 100% zeros observed → the vendor never reports biases, so uncal == cal + (unknown bias); prefer calibrated Accel where present.",
+ status="OBSERVED (Bias*=0) + BACKGROUND"),
+"UncalAccelYMps2": dict(what="Uncalibrated accelerometer Y (m/s²).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"UncalAccelZMps2": dict(what="Uncalibrated accelerometer Z (m/s²).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"BiasXMps2": dict(
+ what="Reported accelerometer bias compensation for X (m/s²).",
+ why="Should convert uncal → calibrated: cal = uncal − bias.",
+ use="Cross-check vs calibrated Accel; here: dead weight (all zeros).",
+ caveats="100% zeros observed — vendor does not populate.",
+ status="OBSERVED (constant 0) + BACKGROUND"),
+"BiasYMps2": dict(what="Bias compensation for Y.", why="Same.", use="Same.", caveats="All zeros.", status="OBSERVED (constant 0) + BACKGROUND"),
+"BiasZMps2": dict(what="Bias compensation for Z.", why="Same.", use="Same.", caveats="All zeros.", status="OBSERVED (constant 0) + BACKGROUND"),
+"CalibrationAccuracy": dict(what="Sensor confidence code 0-3.", why="Trust level.", use="Filter.", caveats="Check constancy.", status="OBSERVED IN DATA + REFERENCE"),
+}
+
+# ------------------------------------------------------------- UncalGyro -----
+UNCAL_GYRO_DEFS = {
+"utcTimeMillis": dict(what="UTC wall-clock timestamp (ms).", why="Calendar anchor.", use="Joins.", caveats="Standard.", status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(
+ what="Monotonic time since boot (ns); ~200 Hz sampling, 16.66 M rows.",
+ why="Alignment clock.",
+ use="Integration check (integrate gyro → compare with quaternion rotation).",
+ caveats="Pair with session.",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"UncalGyroXRadPerSec": dict(
+ what="Uncalibrated angular rate about X (rad/s), bias NOT removed.",
+ why="Raw rotation rate of the phone.",
+ use="Motion features (is the phone being moved?); gyro integration for orientation deltas.",
+ caveats="Spikes to ±23.6 rad/s observed — beyond any plausible hand motion (~±10 rad/s max); check whether spikes align with sample-time gaps (jitter) — Q for Phase D.",
+ status="OBSERVED (±23.6 spikes) + BACKGROUND"),
+"UncalGyroYRadPerSec": dict(what="Uncalibrated rate about Y (rad/s).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"UncalGyroZRadPerSec": dict(what="Uncalibrated rate about Z (rad/s).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"DriftXRadPerSec": dict(
+ what="Reported gyro bias estimate for X (rad/s).",
+ why="Convert uncal → calibrated: cal = uncal − drift.",
+ use="Bias-stability analysis of the gyro.",
+ caveats="Check whether populated (unlike UncalAccel biases which were all zero).",
+ status="OBSERVED IN DATA + BACKGROUND"),
+"DriftYRadPerSec": dict(what="Gyro bias estimate for Y (rad/s).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"DriftZRadPerSec": dict(what="Gyro bias estimate for Z (rad/s).", why="Same.", use="Same.", caveats="Same.", status="OBSERVED IN DATA + BACKGROUND"),
+"CalibrationAccuracy": dict(what="Sensor confidence code 0-3.", why="Trust level.", use="Filter.", caveats="Check constancy.", status="OBSERVED IN DATA + REFERENCE"),
+}
+
+# -------------------------------------------------------------- UncalMag -----
+UNCAL_MAG_DEFS = {
+"utcTimeMillis": dict(what="UTC wall-clock timestamp (ms).", why="Calendar anchor.", use="Joins.", caveats="Standard.", status="OBSERVED IN DATA + BACKGROUND"),
+"elapsedRealtimeNanos": dict(what="Monotonic time since boot (ns).", why="Alignment clock.", use="Joins.", caveats="Pair with session.", status="OBSERVED IN DATA + BACKGROUND"),
+"UncalMagXMicroT": dict(
+ what="Uncalibrated magnetometer X (µT) — raw field WITHOUT hard-iron bias removed.",
+ why="Earth field + local magnetic environment in the device frame.",
+ use="Absolute-heading source (with GRV); Phase G orientation checks.",
+ caveats="Huge DC offsets observed (X median −67 µT) — hard-iron bias dominates; must use Bias columns or calibrated Mag (which is never present!) to get the true field.",
+ status="OBSERVED (median −67 µT) + BACKGROUND"),
+"UncalMagYMicroT": dict(what="Uncalibrated magnetometer Y (µT).", why="Same.", use="Same.", caveats="Same as X.", status="OBSERVED IN DATA + BACKGROUND"),
+"UncalMagZMicroT": dict(what="Uncalibrated magnetometer Z (µT).", why="Same.", use="Same.", caveats="Z median −87.6 µT observed — see X.", status="OBSERVED (−87.6 µT) + BACKGROUND"),
+"BiasXMicroT": dict(
+ what="Reported hard-iron bias for X (µT).",
+ why="Convert uncal → calibrated: cal = uncal − bias.",
+ use="Recover the true magnetic field; calibrating the magnetometer ourselves.",
+ caveats="BiasX median −69 µT observed — populated here (unlike accel biases); close to the uncal offset, consistent.",
+ status="OBSERVED (median −69) + BACKGROUND"),
+"BiasYMicroT": dict(what="Hard-iron bias for Y (µT).", why="Same.", use="Same.", caveats="Check population.", status="OBSERVED IN DATA + BACKGROUND"),
+"BiasZMicroT": dict(what="Hard-iron bias for Z (µT).", why="Same.", use="Same.", caveats="Check population.", status="OBSERVED IN DATA + BACKGROUND"),
+"CalibrationAccuracy": dict(what="Magnetic-field sensor confidence code 0-3.", why="Trust level.", use="Filter; magnetometers are the least reliable consumer sensor near electronics.", caveats="Check value distribution.", status="OBSERVED IN DATA + REFERENCE"),
+}

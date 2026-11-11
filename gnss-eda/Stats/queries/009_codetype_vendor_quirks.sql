@@ -1,0 +1,14 @@
+-- 009 — CodeType vendor quirks [OBSERVED 2026-11-11]
+-- (a) ALL 170,573 CodeType='P' rows are ConstellationType=5 (BeiDou) at
+--     1575.42 MHz (B1C) on CPH2487 (Qualcomm) only. 'P' normally means GPS P(Y)
+--     — Qualcomm labels BeiDou B1C as 'P' here. Vendor quirk, do not decode
+--     CodeType as GPS-semantic.
+-- (b) BeiDou B1I (1561.098 MHz) code split BY DEVICE:
+--     SM-M146B (Exynos) reports CodeType='C' (343,992 rows, med C/N0 39.3)
+--     CPH2401/CPH2325/CPH2487 report 'I' (494,232/120,468/245,606 rows, med 32.2/25.8/31.7)
+--     Same physical signal labelled differently per vendor.
+-- (c) GLONASS channels: exactly 14 carrier frequencies 1,598.0625–1,605.375 MHz,
+--     all CodeType='C', all slot-number Svids. Counts per channel 23,212–72,843.
+-- (d) Median C/N0 per (constellation, carrier, code) ranges 18.9 (GLONASS low
+--     channel) to 39.3 (Samsung BeiDou B1I) — signal identity is a strong
+--     C/N0 predictor.
