@@ -1,0 +1,3 @@
+track_status,n_epochs,mean_regret_db,total_regret_loss_db,regret_share_pct
+Continuously Tracked,898,0.16,141.3,100.0
+Signal Dropped (Lost Track),24,0.0,0.0,0.0

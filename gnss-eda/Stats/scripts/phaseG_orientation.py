@@ -1,16 +1,26 @@
 # Phase G: orientation conventions, quaternion vs Euler, gravity check.
 # Aggregate-only outputs → scratch/profiles/phaseG_results.json
-import duckdb, os, json, time, psutil
+import duckdb
+import os
+import json
+import time
+import psutil
 
 OUT = "/home/tempest/Documents/ISRO_Project/docs/EDA"
 T = os.path.join(OUT, "scratch", "typed")
 PROF = os.path.join(OUT, "scratch", "profiles")
 res = {}
 con = duckdb.connect(":memory:")
-con.execute("SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;")
+con.execute(
+    "SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;"
+)
 con.execute(f"SET temp_directory='{PROF}';")
 
-def rss(): return psutil.Process().memory_info().rss / 1e6
+
+def rss():
+    return psutil.Process().memory_info().rss / 1e6
+
+
 t0 = time.time()
 
 # ---- G1: quaternion → Euler candidate mappings vs OrientationDeg
@@ -57,7 +67,22 @@ SELECT
 FROM d
 """
 r = con.execute(q).fetchone()
-res["euler_vs_quat"] = dict(zip(["n","yaw_med_absdiff","yaw_frac_lt5deg","pitch_med_absdiff","pitchneg_med_absdiff","roll_med_absdiff","rollneg_med_absdiff","roll_as_pitch_med_absdiff","pitch_as_roll_med_absdiff"], r))
+res["euler_vs_quat"] = dict(
+    zip(
+        [
+            "n",
+            "yaw_med_absdiff",
+            "yaw_frac_lt5deg",
+            "pitch_med_absdiff",
+            "pitchneg_med_absdiff",
+            "roll_med_absdiff",
+            "rollneg_med_absdiff",
+            "roll_as_pitch_med_absdiff",
+            "pitch_as_roll_med_absdiff",
+        ],
+        r,
+    )
+)
 print("[G1 euler]", res["euler_vs_quat"], f"rss={rss():.0f} MB", flush=True)
 
 # ---- G2: FOP heading vs OrientationDeg yaw (exact-stamp match test + sampled compare)
@@ -90,7 +115,9 @@ SELECT count(*) AS n,
 FROM d
 """
 r = con.execute(q).fetchone()
-res["fop_vs_ori_yaw"] = dict(zip(["n","med_absdiff_deg","frac_lt5deg","frac_lt10deg"], r))
+res["fop_vs_ori_yaw"] = dict(
+    zip(["n", "med_absdiff_deg", "frac_lt5deg", "frac_lt10deg"], r)
+)
 print("[G2 fop-yaw]", res["fop_vs_ori_yaw"], flush=True)
 
 # ---- G3: quaternion norms
@@ -114,7 +141,9 @@ FROM read_parquet('{T}/Accel.parquet') a
 JOIN read_parquet('{T}/OrientationDeg.parquet') o USING(session, elapsedRealtimeNanos)
 """
 r = con.execute(q).fetchone()
-res["accel_gravity"] = dict(zip(["med_norm", "p05_norm", "p95_norm", "med_z", "med_pitch"], r))
+res["accel_gravity"] = dict(
+    zip(["med_norm", "p05_norm", "p95_norm", "med_z", "med_pitch"], r)
+)
 print("[G4 accel]", res["accel_gravity"], flush=True)
 
 # ---- G5: yaw integer-like check + orientation grid occupancy (yaw octants × face)
@@ -129,4 +158,4 @@ res["yaw_integerlike"] = dict(zip(["n", "frac_integer", "distinct_yaw"], r))
 print("[G5 yaw]", res["yaw_integerlike"], flush=True)
 
 json.dump(res, open(os.path.join(PROF, "phaseG_results.json"), "w"), indent=1)
-print(f"phaseG done in {time.time()-t0:.0f}s, peak rss {rss():.0f} MB")
+print(f"phaseG done in {time.time() - t0:.0f}s, peak rss {rss():.0f} MB")

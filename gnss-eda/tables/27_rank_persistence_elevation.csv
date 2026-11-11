@@ -1,0 +1,4 @@
+top_satellite_elevation,n_epochs,retained_top1_count,rank_persistence_top1_pct,retained_top3_pct
+High (>=60 deg),186,56.0,30.1,31.7
+Low (<30 deg),437,138.0,31.6,32.5
+Mid (30-60 deg),299,104.0,34.8,36.8

@@ -1,4 +1,6 @@
-import os, json, glob
+import os
+import json
+import glob
 
 RAW = "/home/tempest/Documents/ISRO_Project/data/Raw_Logs"
 files = sorted(glob.glob(os.path.join(RAW, "*.txt")))
@@ -16,8 +18,7 @@ for f in files:
             elif line.startswith("#") and "," in line:
                 parts = line[2:].split(",")
                 hdrs[parts[0]] = parts[1:]
-    out.append({"file": os.path.basename(f), "version": version_line,
-                "records": hdrs})
+    out.append({"file": os.path.basename(f), "version": version_line, "records": hdrs})
 
 # Compare record sets and column orders across files
 all_labels = sorted({l for r in out for l in r["records"]})
@@ -31,9 +32,16 @@ for r in out:
 print("Distinct header signatures:", len(sigs))
 for k, v in sigs.items():
     recs = json.loads(k)
-    print("---signature with", len(v), "files:", ", ".join(sorted(set(f.split('_')[0] for f in v))))
+    print(
+        "---signature with",
+        len(v),
+        "files:",
+        ", ".join(sorted(set(f.split("_")[0] for f in v))),
+    )
     for lab, cols in recs.items():
         print("   ", lab, "->", ",".join(cols))
-    print("   files:", [os.path.basename(x) for x in v][:3], "..." if len(v) > 3 else "")
+    print(
+        "   files:", [os.path.basename(x) for x in v][:3], "..." if len(v) > 3 else ""
+    )
 with open("/tmp/opencode/header_inventory.json", "w") as fh:
     json.dump(out, fh)

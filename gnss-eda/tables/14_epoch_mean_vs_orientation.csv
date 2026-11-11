@@ -1,0 +1,5 @@
+session,mean_of_epoch_means,std_between_epochs,avg_within_epoch_std
+90_front_vertical,30.77,0.39,6.23
+90_back_vertical,30.12,0.48,7.23
+0_down_facing,26.1,0.94,5.66
+0_up_facing,25.05,0.79,6.11

@@ -6,21 +6,36 @@ For Raw/Status additionally: rows-per-epoch stats (median, p90, max, n_epochs).
 Run per table; DuckDB window partitions by session; memory kept < 1 GB via
 temp spill if needed.
 """
-import duckdb, os, sys, time, psutil
+
+import duckdb
+import os
+import time
+import psutil
 
 OUT = "/home/tempest/Documents/ISRO_Project/docs/EDA"
 TYPED = os.path.join(OUT, "scratch", "typed")
 PROF = os.path.join(OUT, "scratch", "profiles")
 os.makedirs(PROF, exist_ok=True)
 con = duckdb.connect(database=":memory:")
-con.execute("SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;")
+con.execute(
+    "SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;"
+)
 con.execute(f"SET temp_directory='{PROF}';")
 
-TABLES = {"Raw": "utcTimeMillis", "Status": "UnixTimeMillis", "Fix": "UnixTimeMillis",
-          "Accel": "utcTimeMillis", "UncalAccel": "utcTimeMillis",
-          "UncalGyro": "utcTimeMillis", "UncalMag": "utcTimeMillis",
-          "OrientationDeg": "utcTimeMillis", "GameRotationVector": "utcTimeMillis",
-          "FOP": "utcTimeMillis", "Agc": "utcTimeMillis"}
+TABLES = {
+    "Raw": "utcTimeMillis",
+    "Status": "UnixTimeMillis",
+    "Fix": "UnixTimeMillis",
+    "Accel": "utcTimeMillis",
+    "UncalAccel": "utcTimeMillis",
+    "UncalGyro": "utcTimeMillis",
+    "UncalMag": "utcTimeMillis",
+    "OrientationDeg": "utcTimeMillis",
+    "GameRotationVector": "utcTimeMillis",
+    "FOP": "utcTimeMillis",
+    "Agc": "utcTimeMillis",
+}
+
 
 def gaps(table, tcol):
     return f"""
@@ -52,8 +67,10 @@ def gaps(table, tcol):
     """
     # NOTE: 'dummy' removed below — simpler: two queries.
 
+
 def run(table, tcol):
-    t0 = time.time(); rss0 = psutil.Process().memory_info().rss/1e6
+    t0 = time.time()
+    rss0 = psutil.Process().memory_info().rss / 1e6
     # per-session gap stats on the DISTINCT-epoch series (correct pairing)
     q = f"""
       COPY (
@@ -94,8 +111,11 @@ def run(table, tcol):
           ) GROUP BY session ORDER BY session
         ) TO '{PROF}/{table}_rowsperepoch.csv' (HEADER)"""
         con.execute(q2)
-    rss1 = psutil.Process().memory_info().rss/1e6
-    print(f"[{table}] {time.time()-t0:.1f}s rss {rss0:.0f}->{rss1:.0f} MB", flush=True)
+    rss1 = psutil.Process().memory_info().rss / 1e6
+    print(
+        f"[{table}] {time.time() - t0:.1f}s rss {rss0:.0f}->{rss1:.0f} MB", flush=True
+    )
+
 
 for table, tcol in TABLES.items():
     run(table, tcol)

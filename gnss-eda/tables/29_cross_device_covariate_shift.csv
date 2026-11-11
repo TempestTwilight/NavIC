@@ -1,0 +1,5 @@
+device_name,n_obs,mean_cn0,median_cn0,std_cn0,mean_delta_15s,median_delta_15s,std_delta_15s,mean_elevation,median_elevation
+samsung SM-M146B,2821208,32.79,32.6,5.21,0.064,0.0,1.145,36.46,37.1
+OnePlus CPH2401,4729463,37.29,37.7,6.94,0.099,0.0,3.02,35.28,34.0
+OnePlus CPH2487,7726121,30.91,31.4,4.78,0.008,0.0,1.209,31.35,34.21
+OPPO CPH2325,5619614,24.19,23.8,5.91,0.054,-0.001,3.993,32.67,32.0

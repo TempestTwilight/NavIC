@@ -1,0 +1,11 @@
+Feature Name,OnePlus CPH2401 (MTK),samsung SM-M146B (Exynos),OnePlus CPH2487 (QC),OPPO CPH2325 (MTK),Recommendation
+Cn0DbHz (Raw),YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (Core Target/Input)
+BasebandCn0DbHz,NO (NULL),YES (100%),NO (NULL),NO (NULL),FORBIDDEN (Chipset Restricted)
+ElevationDegrees (Status),YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (Key Geometric Feature)
+AzimuthDegrees (Status),YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (Body Vector Component)
+CarrierFrequencyHz,YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (L1 vs L5 Dual-Band)
+CodeType,YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (Unique Signal Key)
+AgcDb,NO (NULL),YES (100%),NO (NULL),NO (NULL),FORBIDDEN (Samsung Exclusive)
+Calibrated Accel,NO (Uncal Only),YES (100%),NO (Uncal Only),NO (Uncal Only),USE UNCALACCEL (Universal fallback)
+OrientationDeg (Euler),YES (100%),YES (100%),YES (100%),YES (100%),MANDATORY (Convert to 3D Body Frame)
+FOP Heading / Quaternion,YES (October Only),YES (100%),YES (100%),YES (100%),OPTIONAL (Campaign Split Risk)

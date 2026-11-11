@@ -1,0 +1,3 @@
+device_name,n_epochs,mean_candidates,mean_best_future,mean_median_future,mean_headroom_db,median_headroom_db,p25_headroom,p75_headroom
+samsung SM-M146B,917,60.6,41.98,32.82,9.16,9.3,9.05,9.5
+OnePlus CPH2487,935,65.7,41.08,31.38,9.7,9.75,9.3,10.1

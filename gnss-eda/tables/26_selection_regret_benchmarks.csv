@@ -1,0 +1,5 @@
+policy,n_evals,mean_regret_db,median_regret_db,hit_rate_05db_pct,top1_accuracy_pct
+Max Elevation,922,8.67,8.6,10.8,9.8
+Persistence (Max Current C/N0),922,0.16,0.0,94.8,92.3
+Persistence + Elevation Hybrid,922,0.15,0.0,94.9,92.4
+Random Pick,922,7.64,6.8,5.7,5.1

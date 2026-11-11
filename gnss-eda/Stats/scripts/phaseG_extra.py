@@ -1,10 +1,15 @@
 """Phase G extra queries for 06_orientation_and_sessions.md"""
-import duckdb, json, os
+
+import duckdb
+import json
+import os
 
 T = "/home/tempest/Documents/ISRO_Project/docs/EDA/scratch/typed"
 PROF = "/home/tempest/Documents/ISRO_Project/docs/EDA/scratch/profiles"
 con = duckdb.connect(":memory:")
-con.execute("SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;")
+con.execute(
+    "SET memory_limit='1GB'; SET threads=2; SET preserve_insertion_order=false;"
+)
 con.execute(f"SET temp_directory='{PROF}';")
 res = {}
 
@@ -30,7 +35,8 @@ ORDER BY ori.session
 rows = con.execute(q).fetchall()
 res["named_session_rowcounts"] = [list(r) for r in rows]
 print("[GQ1 named session rowcounts]", len(rows), "sessions")
-for r in rows: print(" ", r)
+for r in rows:
+    print(" ", r)
 
 # =====================================================================
 # GQ2: Per named-session angle stats from OrientationDeg
@@ -53,7 +59,8 @@ GROUP BY session ORDER BY session
 rows = con.execute(q).fetchall()
 res["named_ori_stats"] = [list(r) for r in rows]
 print("[GQ2 named ori stats]")
-for r in rows: print(" ", r)
+for r in rows:
+    print(" ", r)
 
 # =====================================================================
 # GQ3: FOP does NOT have pitchDeg or rollDeg, only x, y, z, w, headingDegrees, headingErrorDegrees, conservativeHeadingErrorDegrees.
@@ -73,10 +80,11 @@ GROUP BY session ORDER BY session LIMIT 10
 rows = con.execute(q).fetchall()
 res["fop_sample_stats"] = [list(r) for r in rows]
 print("[GQ3 FOP sample stats for gnss_log sessions]")
-for r in rows: print(" ", r)
+for r in rows:
+    print(" ", r)
 
 # =====================================================================
-# GQ4: OrientationDeg global angle ranges 
+# GQ4: OrientationDeg global angle ranges
 # =====================================================================
 q = f"""
 SELECT
@@ -148,7 +156,8 @@ GROUP BY session ORDER BY session
 rows = con.execute(q).fetchall()
 res["accel_per_session"] = [list(r) for r in rows]
 print("[GQ8 Accel per session]", len(rows), "sessions")
-for r in rows: print(" ", r)
+for r in rows:
+    print(" ", r)
 
 # =====================================================================
 # GQ9: Within-session pitch/roll std per session (OrientationDeg, named only)
@@ -166,7 +175,8 @@ GROUP BY session ORDER BY session
 rows = con.execute(q).fetchall()
 res["named_pitch_roll_std"] = [list(r) for r in rows]
 print("[GQ9 named pitch/roll std]")
-for r in rows: print(" ", r)
+for r in rows:
+    print(" ", r)
 
 # =====================================================================
 # GQ10: GRV Euler yaw: compute degrees(atan2(2*(x*y+w*z), w*w+x*x-y*y-z*z))
@@ -277,19 +287,21 @@ print("[GQ13 FOP vs OrientationDeg pitch/roll]", r)
 # Extract calendar day from session name prefix
 print("[GQ14 calendar day grouping] from sessions_meta.csv analysis")
 import csv
+
 meta_path = "/home/tempest/Documents/ISRO_Project/docs/EDA/scratch/sessions_meta.csv"
 with open(meta_path) as f:
     reader = csv.DictReader(f)
     meta = list(reader)
 
 from collections import defaultdict
+
 day_sessions = defaultdict(list)
 named_sessions = []
 gnss_sessions = []
 for row in meta:
-    s = row['session']
-    if s.startswith('gnss_log_'):
-        parts = s.split('_')
+    s = row["session"]
+    if s.startswith("gnss_log_"):
+        parts = s.split("_")
         day = f"{parts[2]}-{parts[3]}-{parts[4]}"
         day_sessions[day].append(s)
         gnss_sessions.append(s)
@@ -301,8 +313,8 @@ print(f"  gnss_log sessions: {len(gnss_sessions)}")
 print("  Calendar day breakdown:")
 for day in sorted(day_sessions):
     print(f"    {day}: {len(day_sessions[day])} sessions")
-    
-res["calendar_day_breakdown"] = {d: v for d,v in day_sessions.items()}
+
+res["calendar_day_breakdown"] = {d: v for d, v in day_sessions.items()}
 res["named_sessions"] = named_sessions
 res["gnss_sessions_count"] = len(gnss_sessions)
 
@@ -314,19 +326,26 @@ print("\n[GQ15 named session time ranges]")
 ori_csv = "/home/tempest/Documents/ISRO_Project/docs/EDA/scratch/profiles/OrientationDeg_sessions.csv"
 with open(ori_csv) as f:
     reader = csv.DictReader(f)
-    ori_sessions = {r['session']: r for r in reader}
+    ori_sessions = {r["session"]: r for r in reader}
 
 for sess in sorted(named_sessions):
     if sess in ori_sessions:
         row = ori_sessions[sess]
-        tmin_ms = int(row['tmin'])
-        tmax_ms = int(row['tmax'])
-        dur_s = float(row['dur_s'])
-        n_rows = row['n_rows']
+        tmin_ms = int(row["tmin"])
+        tmax_ms = int(row["tmax"])
+        dur_s = float(row["dur_s"])
+        n_rows = row["n_rows"]
         import datetime
-        tmin_dt = datetime.datetime.fromtimestamp(tmin_ms/1000, tz=datetime.timezone.utc)
-        tmax_dt = datetime.datetime.fromtimestamp(tmax_ms/1000, tz=datetime.timezone.utc)
-        print(f"  {sess}: {tmin_dt.strftime('%Y-%m-%d %H:%M')} → {tmax_dt.strftime('%H:%M')} UTC ({dur_s/60:.1f} min), {n_rows} rows")
+
+        tmin_dt = datetime.datetime.fromtimestamp(
+            tmin_ms / 1000, tz=datetime.timezone.utc
+        )
+        tmax_dt = datetime.datetime.fromtimestamp(
+            tmax_ms / 1000, tz=datetime.timezone.utc
+        )
+        print(
+            f"  {sess}: {tmin_dt.strftime('%Y-%m-%d %H:%M')} → {tmax_dt.strftime('%H:%M')} UTC ({dur_s / 60:.1f} min), {n_rows} rows"
+        )
 
 # Save results
 json.dump(res, open(os.path.join(PROF, "phaseG_extra_results.json"), "w"), indent=2)

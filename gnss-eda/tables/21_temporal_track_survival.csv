@@ -1,0 +1,4 @@
+elevation_band,total_epochs,survival_rate_15s_pct,survival_rate_30s_pct
+High (>=45 deg),108220,98.88,98.7
+Low (<20 deg),98863,98.51,98.35
+Mid (20-45 deg),159080,99.16,99.02

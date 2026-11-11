@@ -1,0 +1,5 @@
+time_gap_bin,n_pairs,mean_overlap_pct,median_overlap_pct,p25_overlap,p75_overlap
+< 2 Hours (Intra-Day),588,81.2,83.3,71.4,92.3
+2 - 12 Hours,132,14.6,14.3,13.0,17.4
+12 - 26 Hours (Adjacent Day),403,82.0,85.7,75.0,92.9
+26 - 96 Hours (Multi-Day),1508,29.5,15.0,10.5,22.7
