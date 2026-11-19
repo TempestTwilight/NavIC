@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 import duckdb
 
-from .config import (
+from isro_project.config import (
     CATEGORIZED_DIR,
     GNSS_PARQUET_DIR,
     MERGED_OUTPUT_DIR,
@@ -63,7 +63,7 @@ STATUS_PQ = GNSS_PARQUET_DIR / "Status.parquet"
 ORIENT_PQ = GNSS_PARQUET_DIR / "OrientationDeg.parquet"
 
 # Raw GNSS Logger .txt directory (used for device-ID header parsing only)
-RAW_LOGS_DIR = Path(__file__).resolve().parents[2] / "data" / "Raw_Logs"
+# RAW_LOGS_DIR imported from .config above
 
 
 # ------------------------------------------------------------------ #

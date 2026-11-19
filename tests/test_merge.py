@@ -29,7 +29,7 @@ def test_csv_column_mapping():
 
 def test_asof_join_session_isolation():
     """Verify ASOF JOIN respects session boundaries."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory():
         # Create test data: 2 sessions with overlapping timestamps
         con = duckdb.connect()
 

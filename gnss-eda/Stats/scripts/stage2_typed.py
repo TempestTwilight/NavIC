@@ -18,6 +18,7 @@ TYPED = os.path.join(OUT, "scratch", "typed")
 os.makedirs(TYPED, exist_ok=True)
 GLOB = os.path.join(LINES, "*.parquet")
 
+# ruff: noqa: E741
 I, D, S = "BIGINT", "DOUBLE", "VARCHAR"
 
 # field maps: (label, [(column, type), ...]) -- position 1 = right after the label

@@ -47,7 +47,7 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import (
+from isro_project.config import (
     MERGED_CORPUS,
     BASELINE_ARTIFACTS,
     RANDOM_STATE,
@@ -779,7 +779,7 @@ print("=" * 75)
 # =====================================================================
 
 if model_df["device_id"].nunique() >= 2:
-    cv_groups = model_df["device_id"].astype(str).values
+    cv_groups = model_df["device_id"].astype(str).to_numpy()
 
     cv_group_name = "device"
 
@@ -788,7 +788,7 @@ else:
 
     print("Using held-out SESSION validation.")
 
-    cv_groups = model_df["session_id"].astype(str).values
+    cv_groups = model_df["session_id"].astype(str).to_numpy()
 
     cv_group_name = "session"
 
@@ -869,7 +869,7 @@ sample_indices = []
 
 
 for session in model_df["session_id"].unique():
-    idx = np.where(model_df["session_id"].values == session)[0]
+    idx = np.where(model_df["session_id"].to_numpy() == session)[0]
 
     n = min(RF_SAMPLE_PER_SESSION, len(idx))
 
@@ -885,13 +885,13 @@ X_rf = X[sample_indices]
 
 y_rf = y[sample_indices]
 
-groups_rf = model_df.iloc[sample_indices]["device_id"].astype(str).values
+groups_rf = model_df.iloc[sample_indices]["device_id"].astype(str).to_numpy()
 
 
 # If one device, use session groups.
 
 if len(np.unique(groups_rf)) < 2:
-    groups_rf = model_df.iloc[sample_indices]["session_id"].astype(str).values
+    groups_rf = model_df.iloc[sample_indices]["session_id"].astype(str).to_numpy()
 
 
 print(f"RF training rows: {len(X_rf):,}")
@@ -1150,9 +1150,9 @@ for (device, session, epoch), group in selection_groups:
     # REGRET
     # ================================================================
 
-    ml_regret = actual_best_cn0 - ml_actual_cn0
+    ml_regret = float(actual_best_cn0) - float(ml_actual_cn0)  # ty: ignore[invalid-argument-type]
 
-    baseline_regret = actual_best_cn0 - baseline_actual_cn0
+    baseline_regret = float(actual_best_cn0) - float(baseline_actual_cn0)  # ty: ignore[invalid-argument-type]
 
     # ================================================================
     # TOP-1

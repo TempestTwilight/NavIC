@@ -1,5 +1,7 @@
 """Phase G extra queries for 06_orientation_and_sessions.md"""
 
+import csv
+from collections import defaultdict
 import duckdb
 import json
 import os
@@ -94,7 +96,7 @@ SELECT
 FROM read_parquet('{T}/OrientationDeg.parquet')
 """
 r = con.execute(q).fetchone()
-res["ori_global_ranges"] = list(r)
+res["ori_global_ranges"] = list(r) if r is not None else []
 print("[GQ4 OrientationDeg global ranges]", r)
 
 # =====================================================================
@@ -107,7 +109,7 @@ SELECT
 FROM read_parquet('{T}/FOP.parquet')
 """
 r = con.execute(q).fetchone()
-res["fop_global_ranges"] = list(r)
+res["fop_global_ranges"] = list(r) if r is not None else []
 print("[GQ5 FOP global ranges]", r)
 
 # =====================================================================
@@ -124,7 +126,7 @@ SELECT
 FROM read_parquet('{T}/GameRotationVector.parquet')
 """
 r = con.execute(q).fetchone()
-res["grv_ranges"] = list(r)
+res["grv_ranges"] = list(r) if r is not None else []
 print("[GQ6 GRV ranges]", r)
 
 # =====================================================================
@@ -137,7 +139,7 @@ SELECT
 FROM read_parquet('{T}/FOP.parquet')
 """
 r = con.execute(q).fetchone()
-res["fop_w_negative"] = list(r)
+res["fop_w_negative"] = list(r) if r is not None else []
 print("[GQ7 FOP w negative]", r)
 
 # =====================================================================
@@ -203,7 +205,7 @@ SELECT
 FROM j
 """
 r = con.execute(q).fetchone()
-res["grv_vs_ori_yaw_sample"] = list(r)
+res["grv_vs_ori_yaw_sample"] = list(r) if r is not None else []
 print("[GQ10 GRV vs OrientationDeg yaw drift]", r)
 
 # =====================================================================
@@ -224,7 +226,7 @@ FROM (
 ) sub
 """
 r = con.execute(q).fetchone()
-res["all_sessions_pitch_roll_range"] = list(r)
+res["all_sessions_pitch_roll_range"] = list(r) if r is not None else []
 print("[GQ11 all sessions pitch/roll range]", r)
 
 # =====================================================================
@@ -254,7 +256,7 @@ SELECT count(*) AS n,
 FROM d
 """
 r = con.execute(q).fetchone()
-res["fop_vs_ori_yaw_single_session"] = list(r)
+res["fop_vs_ori_yaw_single_session"] = list(r) if r is not None else []
 print("[GQ12 FOP vs OrientationDeg yaw for gnss_log_2026_10_22_08_30_05]", r)
 
 # =====================================================================
@@ -277,23 +279,21 @@ SELECT count(*) AS n,
 FROM j
 """
 r = con.execute(q).fetchone()
-res["fop_vs_ori_pitchroll"] = list(r)
+res["fop_vs_ori_pitchroll"] = list(r) if r is not None else []
 print("[GQ13 FOP vs OrientationDeg pitch/roll]", r)
 
 # =====================================================================
 # GQ14: Calendar day grouping for gnss_log sessions
 # =====================================================================
 # Session names encode dates: gnss_log_2026_10_19_...
+
 # Extract calendar day from session name prefix
 print("[GQ14 calendar day grouping] from sessions_meta.csv analysis")
-import csv
 
 meta_path = "/home/tempest/Documents/ISRO_Project/docs/EDA/scratch/sessions_meta.csv"
 with open(meta_path) as f:
     reader = csv.DictReader(f)
     meta = list(reader)
-
-from collections import defaultdict
 
 day_sessions = defaultdict(list)
 named_sessions = []

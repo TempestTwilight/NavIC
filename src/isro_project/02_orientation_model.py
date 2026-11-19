@@ -56,7 +56,7 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import (
+from isro_project.config import (
     MERGED_CORPUS,
     ORIENTATION_ARTIFACTS,
     RANDOM_STATE,

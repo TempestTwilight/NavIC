@@ -21,7 +21,7 @@ for f in files:
     out.append({"file": os.path.basename(f), "version": version_line, "records": hdrs})
 
 # Compare record sets and column orders across files
-all_labels = sorted({l for r in out for l in r["records"]})
+all_labels = sorted({lbl for r in out if isinstance(r["records"], dict) for lbl in r["records"]})
 print("Total .txt files:", len(out))
 print("Union of record labels:", all_labels)
 # group by signature (labels + column lists)

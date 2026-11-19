@@ -80,7 +80,7 @@ res["euler_vs_quat"] = dict(
             "roll_as_pitch_med_absdiff",
             "pitch_as_roll_med_absdiff",
         ],
-        r,
+        r or (),
     )
 )
 print("[G1 euler]", res["euler_vs_quat"], f"rss={rss():.0f} MB", flush=True)
@@ -94,7 +94,7 @@ LEFT JOIN (SELECT DISTINCT session, elapsedRealtimeNanos FROM read_parquet('{T}/
   USING(session, elapsedRealtimeNanos)
 """
 r = con.execute(q).fetchone()
-res["fop_stamp_match"] = dict(zip(["fop_rows", "stamp_match"], r))
+res["fop_stamp_match"] = dict(zip(["fop_rows", "stamp_match"], r or ()))
 print("[G2 stamps]", res["fop_stamp_match"], flush=True)
 q = f"""
 WITH j AS (
@@ -116,7 +116,7 @@ FROM d
 """
 r = con.execute(q).fetchone()
 res["fop_vs_ori_yaw"] = dict(
-    zip(["n", "med_absdiff_deg", "frac_lt5deg", "frac_lt10deg"], r)
+    zip(["n", "med_absdiff_deg", "frac_lt5deg", "frac_lt10deg"], r or ())
 )
 print("[G2 fop-yaw]", res["fop_vs_ori_yaw"], flush=True)
 
@@ -127,7 +127,7 @@ for tbl in ("GameRotationVector", "FOP"):
     SELECT round(approx_quantile(n2, 0.5), 6), round(min(n2), 6), round(max(n2), 6) FROM s
     """
     r = con.execute(q).fetchone()
-    res[f"norm_{tbl}"] = dict(zip(["med", "min", "max"], r))
+    res[f"norm_{tbl}"] = dict(zip(["med", "min", "max"], r or ()))
     print(f"[G3 norm {tbl}]", res[f"norm_{tbl}"], flush=True)
 
 # ---- G4: accelerometer gravity check (calibrated Accel rows)
@@ -142,7 +142,7 @@ JOIN read_parquet('{T}/OrientationDeg.parquet') o USING(session, elapsedRealtime
 """
 r = con.execute(q).fetchone()
 res["accel_gravity"] = dict(
-    zip(["med_norm", "p05_norm", "p95_norm", "med_z", "med_pitch"], r)
+    zip(["med_norm", "p05_norm", "p95_norm", "med_z", "med_pitch"], r or ())
 )
 print("[G4 accel]", res["accel_gravity"], flush=True)
 
@@ -154,7 +154,7 @@ SELECT count(*) AS n,
 FROM read_parquet('{T}/OrientationDeg.parquet')
 """
 r = con.execute(q).fetchone()
-res["yaw_integerlike"] = dict(zip(["n", "frac_integer", "distinct_yaw"], r))
+res["yaw_integerlike"] = dict(zip(["n", "frac_integer", "distinct_yaw"], r or ()))
 print("[G5 yaw]", res["yaw_integerlike"], flush=True)
 
 json.dump(res, open(os.path.join(PROF, "phaseG_results.json"), "w"), indent=1)

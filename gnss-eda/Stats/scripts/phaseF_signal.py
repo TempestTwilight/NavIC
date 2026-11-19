@@ -61,10 +61,12 @@ for h in (1, 5, 15):
     for (s,) in con.execute("SELECT DISTINCT session FROM pairs").fetchall():
         a = f"SELECT t, ct, svid, freq FROM pairs WHERE session='{s}'"
         b = f"SELECT t - {h * 1000} AS t, ct, svid, freq FROM pairs WHERE session='{s}'"
-        n = con.execute(
+        row_n = con.execute(
             f"SELECT count(*) FROM ({a}) x SEMI JOIN ({b}) y USING(t, ct, svid, freq)"
-        ).fetchone()[0]
-        tot = con.execute(f"SELECT count(*) FROM ({a})").fetchone()[0]
+        ).fetchone()
+        n = row_n[0] if row_n is not None else 0
+        row_tot = con.execute(f"SELECT count(*) FROM ({a})").fetchone()
+        tot = row_tot[0] if row_tot is not None else 0
         matched += n
         total += tot
     surv[f"h{h}"] = (matched, total)

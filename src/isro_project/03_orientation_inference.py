@@ -30,7 +30,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .config import (
+from isro_project.config import (
     ORIENTATION_ARTIFACTS,
     TEST_DATA_DIR,
     ensure_dirs,
@@ -175,9 +175,14 @@ def engineer_for_orientation(df: pd.DataFrame, target_yaw: float) -> np.ndarray:
 
     Feature keys must exactly match `feature_cols` in train_orientation_model.py.
     """
-    elev_rad = np.radians(df["ElevationDegrees"].values)
-    az_rad = np.radians(df["AzimuthDegrees"].values)
-    rel_az = (df["AzimuthDegrees"].values - target_yaw) % 360
+    elev_vals = df["ElevationDegrees"].to_numpy(dtype=float)
+    az_vals = df["AzimuthDegrees"].to_numpy(dtype=float)
+    freq_vals = df["CarrierFrequencyHz"].to_numpy(dtype=float)
+    constell_vals = df["ConstellationType"].to_numpy()
+
+    elev_rad = np.radians(elev_vals)
+    az_rad = np.radians(az_vals)
+    rel_az = (az_vals - target_yaw) % 360
     rel_az_rad = np.radians(rel_az)
     yaw_rad = np.radians(target_yaw)
 
@@ -208,21 +213,21 @@ def engineer_for_orientation(df: pd.DataFrame, target_yaw: float) -> np.ndarray:
     feat["inc_deg"] = inc_deg
     feat["elevation_sin"] = np.sin(elev_rad)
     feat["elevation_cos"] = np.cos(elev_rad)
-    feat["is_above_horizon"] = (df["ElevationDegrees"].values > 0).astype(float)
+    feat["is_above_horizon"] = (elev_vals > 0).astype(float)
     feat["rel_az_sin"] = np.sin(rel_az_rad)
     feat["rel_az_cos"] = np.cos(rel_az_rad)
 
     # Airmass models
-    elev_clipped = np.clip(df["ElevationDegrees"].values, 1.0, 89.0)
+    elev_clipped = np.clip(elev_vals, 1.0, 89.0)
     feat["airmass_simple"] = 1.0 / np.sin(np.radians(elev_clipped))
     feat["airmass_ky"] = 1.0 / (
-        np.sin(elev_rad) + 0.15 * (df["ElevationDegrees"].values + 3.885) ** (-1.25)
+        np.sin(elev_rad) + 0.15 * (elev_vals + 3.885) ** (-1.25)
     )
 
     # Frequency features
-    feat["freq_ghz"] = df["CarrierFrequencyHz"].values / 1e9
+    feat["freq_ghz"] = freq_vals / 1e9
     feat["freq_loss_db"] = 20.0 * np.log10(
-        df["CarrierFrequencyHz"].values / 1575420000.0
+        freq_vals / 1575420000.0
     )
 
     # Constellation indicators (numeric IDs)
@@ -235,7 +240,7 @@ def engineer_for_orientation(df: pd.DataFrame, target_yaw: float) -> np.ndarray:
         (6, "galileo"),
         (7, "navic"),
     ]:
-        feat[f"is_{name}"] = (df["ConstellationType"].values == ctype).astype(float)
+        feat[f"is_{name}"] = (constell_vals == ctype).astype(float)
 
     # Interaction terms
     feat["rel_az_x_el"] = feat["rel_az_cos"] * feat["elevation_sin"]

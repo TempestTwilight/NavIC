@@ -4,10 +4,12 @@ Every query is aggregate-only (memory-safe). Numeric profiling uses
 approx_count_distinct and approx_quantile per the resource rules.
 """
 
-import duckdb
-import os
+import glob
 import json
+import os
+import re
 import time
+import duckdb
 import psutil
 
 OUT = "/home/tempest/Documents/ISRO_Project/docs/EDA"
@@ -32,9 +34,6 @@ for t in [
 ]:
     TIMECOL[t] = "utcTimeMillis"
 TIMECOL["Nav"] = None
-
-import re
-import glob
 
 
 def cols_of(path):
@@ -155,7 +154,7 @@ def main(tables=None):
             for c in cols_of(path)
             if c[0] not in ("session", "line", "_extra_field_1")
         ]
-        view = f"'{path}'"  # read directly
+# Drop unused variable
         # register as view name tbl
         con.execute(
             f"CREATE OR REPLACE VIEW {tbl} AS SELECT * FROM read_parquet('{path}')"

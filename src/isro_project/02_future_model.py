@@ -13,10 +13,10 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import (
-    HORIZON_MS,
+from isro_project.config import (
     MERGED_CORPUS,
     RANDOM_STATE,
+    HORIZON_MS,
     TARGET_TOLERANCE_MS,
     TEMPORAL_ARTIFACTS,
     ensure_dirs,
@@ -165,11 +165,12 @@ def add_lag_feature(frame, value_col, lag_ms, output_col):
         tolerance=TARGET_TOLERANCE_MS,
     )
 
-    result = pd.Series(index=frame.index, dtype=float)
-    result.loc[merged["_orig_index"].values] = merged[output_col].values
+    matched_idx = merged["_orig_index"].to_numpy()
+    res_arr = np.full(len(frame), np.nan, dtype=float)
+    res_arr[matched_idx] = merged[output_col].to_numpy()
 
     frame = frame.copy()
-    frame[output_col] = result
+    frame[output_col] = res_arr
     return frame
 
 
@@ -358,11 +359,12 @@ future = pd.merge_asof(
     tolerance=TARGET_TOLERANCE_MS,
 )
 
-target_raw = pd.Series(index=df.index, dtype=float)
-target_raw.loc[future["_orig_index"].values] = future["target_cn0_raw"].values
+matched_future_idx = future["_orig_index"].to_numpy()
+target_raw_arr = np.full(len(df), np.nan, dtype=float)
+target_raw_arr[matched_future_idx] = future["target_cn0_raw"].to_numpy()
 
 # Residual target: delta Cn0 = future_cn0 - current_cn0
-df["target_delta_cn0"] = target_raw - df["Cn0DbHz"]
+df["target_delta_cn0"] = target_raw_arr - df["Cn0DbHz"]
 df["target_cn0"] = df["target_delta_cn0"]
 print(f"Target constructed in {time.time() - t0:.2f}s")
 
