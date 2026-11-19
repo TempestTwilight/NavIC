@@ -204,11 +204,19 @@ def engineer_for_orientation(df: pd.DataFrame, target_yaw: float) -> np.ndarray:
     ) * np.sin(yaw_rad)
     n_up = np.cos(roll_rad) * np.cos(pitch_rad)
 
+    feat = {}
+    # --------------------------------------------------------
+    # 3D body-frame satellite vectors (candidate yaw, assumed flat tilt pitch=0, roll=0)
+    # --------------------------------------------------------
+    cy, sy = np.cos(yaw_rad), np.sin(yaw_rad)
+    feat["s_body_x"] = np.clip(cy * s_east - sy * s_north, -1.0, 1.0)
+    feat["s_body_y"] = np.clip(sy * s_east + cy * s_north, -1.0, 1.0)
+    feat["s_body_z"] = np.clip(s_up, -1.0, 1.0)
+
     # Incidence angle cosine
     cos_inc = np.clip(s_east * n_east + s_north * n_north + s_up * n_up, -1.0, 1.0)
     inc_deg = np.degrees(np.arccos(cos_inc))
 
-    feat = {}
     feat["cos_inc"] = cos_inc
     feat["inc_deg"] = inc_deg
     feat["elevation_sin"] = np.sin(elev_rad)

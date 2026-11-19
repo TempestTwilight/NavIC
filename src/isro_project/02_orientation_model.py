@@ -643,25 +643,33 @@ if rf_model is not None and hasattr(rf_model, "feature_importances_"):
 # ============================================================
 
 EXPECTED_INFERENCE_KEYS = {
+    # 3D body-frame satellite vectors
+    "s_body_x",
+    "s_body_y",
+    "s_body_z",
+    # Core physics-based geometry
+    "cos_inc",
     "elevation_sin",
-    "elevation_cos",
+    "is_above_horizon",
+    # Relative azimuth
     "rel_az_sin",
     "rel_az_cos",
-    "airmass",
-    "is_above_horizon",
-    "freq_ghz",
+    # Atmospheric path
+    "airmass_ky",
+    # Signal parameters
+    "freq_loss_db",
+    # Constellation indicators
     "is_gps",
+    "is_sbas",
     "is_glonass",
-    "is_galileo",
-    "is_beidou",
     "is_qzss",
+    "is_beidou",
+    "is_galileo",
     "is_navic",
+    # Interaction terms
     "rel_az_x_el",
-    "navic_x_airmass",
-    "gps_x_airmass",
-    "galileo_x_airmass",
-    "tilt_angle_sin",
-    "tilt_angle_cos",
+    "cos_inc_x_airmass",
+    "freq_loss_x_elev",
 }
 
 trained_keys = set(feature_cols)
