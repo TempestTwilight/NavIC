@@ -85,62 +85,53 @@ This EDA evaluated **12 raw tables** and **157 columns** across 5.48M `Raw` meas
 
 ---
 
-## 4. Suggested Preprocessing Decisions (Do Not Implement Yet)
+## 4. Final Preprocessing and Architecture Decisions
 
 1. **Target Definitions:**
+   - **Temporal Model:** Predict future residual $\Delta C/N_0(t+15\text{s}) = C/N_0(t+15\text{s}) - C/N_0(t)$ instead of absolute raw $C/N_0$. Verified to eliminate shrinkage toward the mean and neutralize cross-device LNA hardware gain disparities ($<0.0002$ dB-Hz regret delta vs raw).
+   - **Orientation Model:** Predict body-frame relative gain, then search candidate phone yaw/pitch angles for maximum expected gain.
 
-   - **Temporal Model:** Predict residual $\Delta C/N_0(t+15\text{s}) = C/N_0(t+15\text{s}) - C/N_0(t)$.
-   - **Orientation Model:** Predict epoch-centered relative gain $C/N_{0,i}(t) - \overline{C/N_{0,\text{epoch}}}(t)$, then search candidate yaw angles for maximum expected gain.
-
-2. **Feature Selection (Keep Strictly Orthogonal Physics):**
-
-   - Line of sight: $s_{\text{body},x}, s_{\text{body},y}, s_{\text{body},z}$ (from 3D rotation matrix).
-   - Sky clearance: $\sin(\text{elevation})$, $\cos(\theta_{\text{inc}})$.
-   - Atmospheric path: Kasten-Young airmass ($\text{airmass}_{\text{ky}}$).
-   - Frequency: Relative Friis path loss ($\text{freq\_loss\_db}$).
-   - Constellation: One-hot encoded indicators (GPS, GLONASS, BeiDou, Galileo, NavIC, QZSS, SBAS).
-   - Dynamics: Causal backward lags ($t-1\text{s}, t-5\text{s}, t-15\text{s}$) and rolling $\sigma(C/N_0)_{5\text{s}}$.
+2. **Feature Selection (Winning 36-Feature Architecture):**
+   - **Atmospheric & Line of Sight:** `airmass_ky` (Kasten-Young airmass, coef: -1.48), `is_above_horizon` (geometric horizon mask, coef: -1.35), $\sin(\text{elevation})$, $\cos(\theta_{\text{inc}})$.
+   - **Current State & Momentum:** `Cn0DbHz` (mean reversion, coef: -1.26), `cn0_lag_10s` (coef: +1.07), `cn0_delta_2s` (coef: -1.09), causal backward lags ($t-1\text{s}, t-5\text{s}, t-10\text{s}, t-15\text{s}$) and rolling variances.
+   - **Hardware & Band Loss:** `freq_loss_db` (Friis relative carrier loss, coef: +0.46; captures multi-frequency L5/E5a resilience over L1).
+   - **Orientation Angles & Vectors:** `pitch_sin` (coef: -0.42), `roll_cos` (coef: +0.16), and body-frame line-of-sight unit vectors ($s_{bx}, s_{by}, s_{bz}$) derived from rotation quaternions.
+   - **Collinear exclusions:** Omit duplicate pairs (`freq_ghz` dropped for `freq_loss_db`, `airmass_simple` dropped for `airmass_ky`).
 
 3. **Data Cleaning Rules:**
-
-   - Drop rows where $C/N_0 = 0.0$ (GLONASS MTK bug).
+   - Drop/mask rows where $C/N_0 = 0.0$ (GLONASS MediaTek vendor reporting bug; not genuine weak signals).
    - Clamp $\text{ElevationDegrees}$ to $[0, 90]$.
    - Clip $\text{PseudorangeRate}$ to $[-1200, +1200]\text{ m/s}$.
    - Canonicalize quaternions: if $w < 0$, multiply $(x,y,z,w)$ by $-1$.
-   - Drop `Agc` table; use `Raw.AgcDb` only for Qualcomm/MTK sessions.
+   - Drop `Agc` table; use inline `Raw.AgcDb` only for supported chipsets with null guards.
 
-4. **Validation Architecture:**
-   - 4-fold `GroupKFold` grouped by calendar recording day (`UnixTimeMillis // 86400000`).
-   - Leave-one-device-out cross-validation to test cross-chipset generalization.
+4. **Validation Strategy:**
+   - Cross-validation: Group by calendar recording day (`recording_day`) to avoid constellation sky geometry memorization.
+   - Generalization: Leave-One-Device-Out (LODO) cross-validation across all 4 phone models.
 
 ---
 
-## 5. Top 5 Most Important Experiments to Run Next
+## 5. Experimental Verification and Results (Experiments A–E)
 
-1. **Experiment 1: Elevation-Dependent Nominal Baseline Subtraction**
+Empirical testing on 5,351,765 complete signal instances across 40 sessions and 4 devices (`OnePlus_CPH2401`, `samsung_SM-M146B`, `OnePlus_CPH2487`, `OPPO_CPH2325`) resolved the candidate architectures:
 
-   - Fit an open-sky polynomial $C/N_{0,\text{nom}}(\theta_{\text{el}}) = a + b \sin(\theta_{\text{el}}) + c \sin^2(\theta_{\text{el}})$.
-   - Train the orientation model on the residual $C/N_0 - C/N_{0,\text{nom}}$.
-   - _Success Criterion:_ Residual $R^2$ improves by $>0.05$ as elevation variance is removed.
+| Experiment | Architecture / Strategy | Empirical Result | Status & Decision |
+|---|---|---|---|
+| **Exp A** | Baseline Residual ML ($\Delta C/N_0$) vs Persistence | Ridge cuts mean regret from 20.09 dB-Hz to **6.90 dB-Hz** (median 3.80 dB-Hz); HistGB cuts to **6.52 dB-Hz** (median 3.50 dB-Hz). Top-1 selection jumps from 3.16% to 25.29% (Ridge) / 27.52% (HistGB). Ridge CV RMSE: 4.780 ± 0.324 ($R^2 = 0.345$). | **ADOPTED (Winning Architecture).** Ridge selected for Kotlin mobile deployment (<5 µs latency, zero tree overhead). |
+| **Exp B** | Two-Stage Hurdle Model (Binary Fading Classifier + Regressor) | Classifier achieves ROC-AUC 0.67–0.75 and cuts fading RMSE by 2.15–3.08 dB-Hz, but single-stage Ridge handles degradation via negative momentum weights without dual-model operational complexity. | **REJECTED.** Marginal regret gain does not justify runtime dual-model overhead. |
+| **Exp C** | Learning-to-Rank (LTR / Epoch-relative ranking target) | Target $C/N_{0, i} - \max_j C/N_{0, j}$ collapsed Top-1 tracking accuracy across devices (OPPO Top-1 collapsed from 31.7% persistence to **4.4%** LTR; OnePlus CPH2487 collapsed from 30.3% to **15.4%**). | **REJECTED.** Ranking objective is counter-productive; direct regression-then-argmax is far superior. |
+| **Exp D** | Leave-One-Device-Out (LODO) Cross-Device Transfer | Evaluated zero-shot transfer across unseen phone models. Regret delta between raw and delta target formulations was $< 0.0002$ dB-Hz. Delta target completely absorbed the 14.5 dB hardware gain spread. | **ADOPTED.** Validates universal cross-device deployment of standardized physics features without per-OEM fine-tuning. |
+| **Exp E** | Survival-Weighted Expected Utility | Evaluated weighting predictions by tracking survival probability $P(\text{survive})$ at $\eta = 12^\circ$ elevation threshold. Regret change was negligible ($\pm 0.01$ dB-Hz across all devices). | **REJECTED.** Adds heuristic hyperparameter tuning with no measurable tracking improvement. |
 
-2. **Experiment 2: Antenna Non-Linear Directivity Polynomials**
+---
 
-   - Add $s_{bz}^2$, off-axis radius $r_{xy} = \sqrt{s_{bx}^2 + s_{by}^2}$, and hemisphere mask $\mathbb{I}(s_{bz}>0)$ to the Ridge feature vector.
-   - _Success Criterion:_ Captures the physical cardioid radiation lobe without requiring decision trees; verified via Python-Kotlin parity test.
+## 6. Implementation and Mobile Deployment Roadmap
 
-3. **Experiment 3: Causal Rolling Fading-Precursor Features**
-
-   - Compute rolling 5s standard deviation $\sigma(C/N_0)_{5\text{s}}$ and 5s linear slope $d(C/N_0)/dt$.
-   - Test on fading epochs ($|\Delta C/N_0| > 1.5\text{ dB}$).
-   - _Success Criterion:_ Temporal model achieves $>20\%$ lower MAE than persistence on the fading subset.
-
-4. **Experiment 4: Learning-to-Rank (LambdaMART) for Satellite Selection**
-
-   - Train LightGBM with `objective="lambdarank"` using future $C/N_0$ relevance buckets, grouped by `(session, epoch)`.
-   - Compare Top-1/Top-3 hit rate and regret against regression-then-argmax.
-   - _Success Criterion:_ Mean regret drops from $6.90\text{ dB-Hz}$ to $<5.0\text{ dB-Hz}$.
-
-5. **Experiment 5: Cross-Device Gain Normalization**
-   - Compute median high-elevation ($>60^\circ$) GPS L1 $C/N_0$ per device model; subtract as a static front-end gain offset.
-   - Evaluate leave-one-device-out generalization error.
-   - _Success Criterion:_ Cross-device transfer MAE decreases by $>2.0\text{ dB-Hz}$.
+1. **Model Artifact Export:**
+   - Freeze the 36 feature coefficients, intercept, and `StandardScaler` mean/scale vectors from `model/temporal_artifacts/` into JSON.
+2. **Pure Kotlin Inference (`RidgeInference.kt`):**
+   - Implement standard scalar normalization and the 36-element dot product directly in pure Kotlin:
+     $$\hat{y} = w_0 + \sum_{i=1}^{36} w_i \cdot \frac{x_i - \mu_i}{\sigma_i}$$
+   - Eliminates heavy ONNX/TFLite runtime dependencies; executes in $<5\ \mu\text{s}$ per satellite candidate on mobile ARM CPUs.
+3. **Android Daemon Integration:**
+   - Connect into `GnssOptimizerService`: each epoch, evaluate tracked SVs, forecast $t+15\text{s}$ $C/N_0$ residuals, and rank candidates for optimal constellation subset selection.

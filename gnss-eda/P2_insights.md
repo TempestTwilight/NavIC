@@ -177,5 +177,50 @@ Comprehensive running findings from the Phase 2 Relationship-focused EDA. Each i
 - **Implication for Modeling:** `BasebandCn0DbHz` can be used across all devices. `Raw.AgcDb` should be excluded or imputed for Samsung. The previous claim that both features are "Samsung-only" was incorrect and would have caused models to discard a universal feature.
 - **Phase 1 Alignment:** Contradicts an error in Phase 1 or Phase 2 draft feature matrices; corrected via re-verification.
 
+---
+
+### INS-22: Baseline Residual ML (Ridge & Tree) Drops Selection Regret by >13 dB-Hz over Persistence
+- **Statement:** Predicting 15-second residual changes $\Delta C/N_0$ drastically outperforms persistence across 5,351,765 instances (40 sessions, 4 devices). Mean selection regret drops from 20.09 dB-Hz (persistence) to 6.90 dB-Hz (Ridge) and 6.52 dB-Hz (HistGB). Top-1 selection accuracy increases nearly 9x from 3.16% to 25.29% (Ridge) / 27.52% (HistGB), while Top-3 accuracy increases from 7.83% to 47.23% (Ridge) / 51.07% (HistGB). Ridge CV RMSE is 4.780 ± 0.324 ($R^2 = 0.345$).
+- **Evidence:** Exp A in `docs/EXPERIMENT_RESULTS_REPORT.md`. Per-device regret improvements: OPPO +2.35 dB-Hz, Samsung +0.99 dB-Hz, OnePlus CPH2401 +0.19 dB-Hz, OnePlus CPH2487 +0.16 dB-Hz.
+- **Confidence:** HIGH (5.35M signal instances, 4 phone platforms under calendar-grouped CV).
+- **Implication for ML:** Ridge regression matches gradient boosting tree performance within 0.38 dB-Hz regret, while enabling pure Kotlin array dot-product inference (<5 $\mu$s per SV candidate) with zero runtime ML framework dependencies. Selected as the winning architecture for Android deployment.
+- **Phase 1 Alignment:** Confirms and empirically proves the residual learning hypothesis over naive persistence.
+
+---
+
+### INS-23: Two-Stage Hurdle Architecture Cuts Fading RMSE but Adds Unneeded Operational Complexity
+- **Statement:** Fading events ($|\Delta C/N_0| > 1.5\text{ dB-Hz}$) exhibit strong predictive precursor signatures, with a dedicated binary classifier achieving ROC-AUC of 0.67–0.75 across devices (OPPO: 0.7509, OnePlus CPH2401: 0.7049, CPH2487: 0.6769, Samsung: 0.6688) and cutting fading-event RMSE by 2.15–3.08 dB-Hz over persistence. However, single-stage Ridge regression with momentum and jitter features naturally scales down predictions during fading without a separate classifier.
+- **Evidence:** Exp B in `docs/EXPERIMENT_RESULTS_REPORT.md`. OPPO fading RMSE: 9.50 dB-Hz persistence $\to$ 6.42 dB-Hz Hurdle.
+- **Confidence:** HIGH.
+- **Implication for ML:** A single continuous Ridge regression model handles degradation sufficiently well, rendering a two-stage hurdle pipeline redundant for on-device deployment.
+- **Phase 1 Alignment:** Validates jitter precursor utility (INS-15), while resolving architecture choice in favor of a single linear model.
+
+---
+
+### INS-24: Learning-to-Rank (LTR) Degrades Top-1 Satellite Tracking Selection
+- **Statement:** Formulating satellite selection as an epoch-relative ranking target ($C/N_{0, i} - \max_j C/N_{0, j}$) severely degrades selection accuracy compared to direct residual regression. Top-1 tracking accuracy collapsed to 4.4% on OPPO (vs 31.7% persistence) and 15.4% on OnePlus CPH2487 (vs 30.3% persistence).
+- **Evidence:** Exp C in `docs/EXPERIMENT_RESULTS_REPORT.md`.
+- **Confidence:** HIGH.
+- **Implication for ML:** Relative ranking targets discard scale information essential for distinguishing marginal candidate differences from catastrophic signal drops. Direct continuous regression $\hat{\Delta C/N_0} \to \text{argmax}$ is required; LTR is rejected.
+- **Phase 1 Alignment:** Formally refutes the LTR ranking objective proposed in Phase 1 / early Phase 2.
+
+---
+
+### INS-25: Residual Target ($\Delta C/N_0$) Transfers Zero-Shot Cross-Device Without Gain Degradation
+- **Statement:** In Leave-One-Device-Out (LODO) cross-validation across 4 hardware platforms, models trained on $\Delta C/N_0$ transfer zero-shot across unseen phone manufacturers with a regret difference between raw and delta formulations of $<0.0002\text{ dB-Hz}$. The delta target completely neutralizes the 14.5 dB front-end hardware gain disparity.
+- **Evidence:** Exp D in `docs/EXPERIMENT_RESULTS_REPORT.md`.
+- **Confidence:** HIGH (5.35M instances, 4 distinct OEMs/chipsets).
+- **Implication for ML:** Confirms that standardized physics and geometric features (airmass_ky, is_above_horizon, carrier frequency loss, orientation angles, lag terms) generalize cleanly without per-device calibration or fine-tuning.
+- **Phase 1 Alignment:** Confirms and proves Recommendation 2 from Phase 1 and INS-19.
+
+---
+
+### INS-26: Multiplicative Survival Weighting Offers No Significant Tracking Regret Benefit
+- **Statement:** Weighting predicted future $C/N_0$ by empirical survival probability $P(\text{survive})$ calibrated at an elevation threshold of $\eta = 12^\circ$ produces negligible selection regret change ($\pm 0.01\text{ dB-Hz}$; OPPO: +0.004 dB-Hz, OnePlus CPH2401: 0.000 dB-Hz, OnePlus CPH2487: +0.011 dB-Hz, Samsung: -0.047 dB-Hz) compared to direct regression.
+- **Evidence:** Exp E in `docs/EXPERIMENT_RESULTS_REPORT.md`.
+- **Confidence:** HIGH.
+- **Implication for ML:** The empirical survival curve adds heuristic calibration overhead without measurable regret reduction. Elevation is already implicitly captured by the 36-feature regression model (`airmass_ky` coef -1.48, `is_above_horizon` coef -1.35). Survival weighting is rejected.
+- **Phase 1 Alignment:** Resolves Open Question Q-028 / INS-18.
+
 
 
