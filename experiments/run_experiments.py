@@ -10,6 +10,7 @@ Reports real results for:
 """
 
 import importlib
+import os
 from pathlib import Path
 import sys
 import time
@@ -30,7 +31,7 @@ from sklearn.metrics import (
 
 warnings.filterwarnings("ignore")
 
-PROJECT_ROOT = Path("/home/tempest/Documents/ISRO_Project")
+PROJECT_ROOT = Path(os.environ.get("ISRO_PROJECT_ROOT", "/home/tempest/Documents/ISRO_Project"))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from isro_project.config import (  # noqa: E402

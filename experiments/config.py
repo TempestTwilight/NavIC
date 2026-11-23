@@ -10,8 +10,9 @@ from pathlib import Path
 # Paths (Read-Only Data Sources)
 # =============================================================================
 
-# Project root
-PROJECT_ROOT = Path("/home/tempest/Documents/ISRO_Project")
+# Project root (honour ISRO_PROJECT_ROOT for Kaggle or custom environments)
+import os
+PROJECT_ROOT = Path(os.environ.get("ISRO_PROJECT_ROOT", "/home/tempest/Documents/ISRO_Project"))
 
 # Raw data (never modify)
 DATA_DIR = PROJECT_ROOT / "data" / "Raw_Logs"

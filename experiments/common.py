@@ -3,12 +3,13 @@ Reuses tested pipeline logic from src/isro_project/02_future_model.py.
 """
 
 import importlib
+import os
 from pathlib import Path
 import sys
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path("/home/tempest/Documents/ISRO_Project")
+PROJECT_ROOT = Path(os.environ.get("ISRO_PROJECT_ROOT", "/home/tempest/Documents/ISRO_Project"))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from isro_project.config import HORIZON_MS, MERGED_CORPUS, TARGET_TOLERANCE_MS  # noqa: E402
